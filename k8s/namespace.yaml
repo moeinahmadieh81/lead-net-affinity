@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: lead-framework
+  labels:
+    name: lead-framework
+    app: lead-framework

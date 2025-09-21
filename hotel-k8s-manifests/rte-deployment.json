@@ -1,0 +1,87 @@
+{
+  "apiVersion": "apps/v1",
+  "kind": "Deployment",
+  "metadata": {
+    "name": "rte",
+    "namespace": "hotel-reservation",
+    "labels": {
+      "app": "rate",
+      "availability-zone": "us-west-1c",
+      "network-tier": "standard",
+      "service": "rte"
+    }
+  },
+  "spec": {
+    "replicas": 2,
+    "selector": {
+      "matchLabels": {
+        "app": "rte"
+      }
+    },
+    "template": {
+      "metadata": {
+        "labels": {
+          "app": "rte",
+          "service": "rte"
+        }
+      },
+      "spec": {
+        "containers": [
+          {
+            "name": "rte",
+            "image": "rate:latest",
+            "ports": [
+              {
+                "containerPort": 8080,
+                "name": "http"
+              }
+            ],
+            "resources": {
+              "requests": {
+                "cpu": "100m",
+                "memory": "128Mi"
+              },
+              "limits": {
+                "cpu": "500m",
+                "memory": "512Mi"
+              }
+            },
+            "env": [
+              {
+                "name": "SERVICE_NAME",
+                "value": "rate"
+              },
+              {
+                "name": "SERVICE_ID",
+                "value": "rte"
+              }
+            ],
+            "livenessProbe": {
+              "httpGet": {
+                "path": "/health",
+                "port": 8080
+              },
+              "initialDelaySeconds": 30,
+              "periodSeconds": 10
+            },
+            "readinessProbe": {
+              "httpGet": {
+                "path": "/ready",
+                "port": 8080
+              },
+              "initialDelaySeconds": 5,
+              "periodSeconds": 5
+            }
+          }
+        ],
+        "nodeSelector": {
+          "topology.kubernetes.io/zone": "us-west-1c"
+        },
+        "restartPolicy": "Always"
+      }
+    },
+    "strategy": {
+      "type": "RollingUpdate"
+    }
+  }
+}

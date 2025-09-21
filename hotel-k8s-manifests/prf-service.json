@@ -1,0 +1,26 @@
+{
+  "apiVersion": "v1",
+  "kind": "Service",
+  "metadata": {
+    "name": "prf",
+    "namespace": "hotel-reservation",
+    "labels": {
+      "app": "profile",
+      "service": "prf"
+    }
+  },
+  "spec": {
+    "selector": {
+      "app": "prf"
+    },
+    "ports": [
+      {
+        "port": 80,
+        "targetPort": 8080,
+        "protocol": "TCP",
+        "name": "http"
+      }
+    ],
+    "type": "ClusterIP"
+  }
+}

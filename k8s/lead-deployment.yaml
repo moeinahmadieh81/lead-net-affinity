@@ -1,0 +1,123 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lead-framework
+  namespace: lead-framework
+  labels:
+    app: lead-framework
+    component: orchestrator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: lead-framework
+  template:
+    metadata:
+      labels:
+        app: lead-framework
+        component: orchestrator
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: lead-framework
+      containers:
+      - name: lead-framework
+        image: lead-framework:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8080
+          name: http
+          protocol: TCP
+        env:
+        - name: LEAD_CONFIG_PATH
+          value: "/app/config/service_config.json"
+        - name: PROMETHEUS_URL
+          valueFrom:
+            configMapKeyRef:
+              name: lead-config
+              key: prometheus_url
+        - name: MONITORING_INTERVAL
+          valueFrom:
+            configMapKeyRef:
+              name: lead-config
+              key: monitoring_interval
+        - name: RESOURCE_THRESHOLD
+          valueFrom:
+            configMapKeyRef:
+              name: lead-config
+              key: resource_threshold
+        - name: LATENCY_THRESHOLD
+          valueFrom:
+            configMapKeyRef:
+              name: lead-config
+              key: latency_threshold
+        - name: KUBERNETES_NAMESPACE
+          valueFrom:
+            configMapKeyRef:
+              name: lead-config
+              key: kubernetes_namespace
+        - name: OUTPUT_DIRECTORY
+          valueFrom:
+            configMapKeyRef:
+              name: lead-config
+              key: output_directory
+        volumeMounts:
+        - name: config-volume
+          mountPath: /app/config
+        - name: manifests-volume
+          mountPath: /app/k8s-manifests
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        securityContext:
+          allowPrivilegeEscalation: false
+          runAsNonRoot: true
+          runAsUser: 1001
+          runAsGroup: 1001
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+      volumes:
+      - name: config-volume
+        configMap:
+          name: lead-config
+      - name: manifests-volume
+        emptyDir: {}
+      nodeSelector:
+        kubernetes.io/os: linux
+      tolerations:
+      - key: "node-role.kubernetes.io/master"
+        operator: "Exists"
+        effect: "NoSchedule"
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            preference:
+              matchExpressions:
+              - key: "node-role.kubernetes.io/worker"
+                operator: In
+                values: ["true"]

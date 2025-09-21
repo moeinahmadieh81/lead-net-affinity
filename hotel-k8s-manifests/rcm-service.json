@@ -1,0 +1,26 @@
+{
+  "apiVersion": "v1",
+  "kind": "Service",
+  "metadata": {
+    "name": "rcm",
+    "namespace": "hotel-reservation",
+    "labels": {
+      "app": "recommendation",
+      "service": "rcm"
+    }
+  },
+  "spec": {
+    "selector": {
+      "app": "rcm"
+    },
+    "ports": [
+      {
+        "port": 80,
+        "targetPort": 8080,
+        "protocol": "TCP",
+        "name": "http"
+      }
+    ],
+    "type": "ClusterIP"
+  }
+}

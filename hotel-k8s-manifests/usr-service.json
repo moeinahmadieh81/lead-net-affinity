@@ -1,0 +1,26 @@
+{
+  "apiVersion": "v1",
+  "kind": "Service",
+  "metadata": {
+    "name": "usr",
+    "namespace": "hotel-reservation",
+    "labels": {
+      "app": "user",
+      "service": "usr"
+    }
+  },
+  "spec": {
+    "selector": {
+      "app": "usr"
+    },
+    "ports": [
+      {
+        "port": 80,
+        "targetPort": 8080,
+        "protocol": "TCP",
+        "name": "http"
+      }
+    ],
+    "type": "ClusterIP"
+  }
+}
