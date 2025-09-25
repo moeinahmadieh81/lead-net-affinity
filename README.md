@@ -11,8 +11,9 @@ LEAD is a framework integrated into Kubernetes that utilizes three main algorith
 - **Algorithm 1: Scoring** - Evaluates critical paths considering network topology (bandwidth, hops, geo distance, availability zones)
 - **Algorithm 2: Real-time Monitoring** - Continuously monitors services and dynamically scales bottleneck services
 - **Algorithm 3: Affinity Rule Generator** - Generates Kubernetes affinity rules for optimal service co-location
-- **Network Topology Integration** - Analyzes and optimizes based on network characteristics
-- **Prometheus Integration** - Real-time metrics collection and monitoring
+- **Dynamic Network Topology** - Label-based network discovery without static mappings
+- **Real-time Prometheus Integration** - Live metrics collection and monitoring
+- **Geographic Awareness** - Automatic optimization for multi-region deployments
 - **Kubernetes Config Generation** - Automatic generation of deployment and service manifests
 
 ## Architecture

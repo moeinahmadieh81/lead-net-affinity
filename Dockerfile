@@ -1,4 +1,5 @@
-# Multi-stage build for LEAD framework
+
+ت# Multi-stage build for LEAD Scheduler
 FROM golang:1.21-alpine AS builder
 
 # Set working directory
@@ -16,8 +17,8 @@ RUN go mod download
 # Copy source code
 COPY . .
 
-# Build the application
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o lead-framework .
+# Build the scheduler binary
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o lead-scheduler ./cmd/scheduler
 
 # Final stage
 FROM alpine:latest
@@ -32,24 +33,24 @@ RUN addgroup -g 1001 -S lead && \
 WORKDIR /app
 
 # Copy binary from builder stage
-COPY --from=builder /app/lead-framework .
+COPY --from=builder /app/lead-scheduler .
 
 # Copy example configurations
 COPY --from=builder /app/examples ./examples
 
 # Create directories for output
-RUN mkdir -p /app/k8s-manifests /app/hotel-k8s-manifests && \
+RUN mkdir -p /app/k8s-manifests /app/config && \
     chown -R lead:lead /app
 
 # Switch to non-root user
 USER lead
 
-# Expose port for health checks
-EXPOSE 8080
+# Expose port for metrics
+EXPOSE 10259
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider http://localhost:8080/health || exit 1
+    CMD wget --no-verbose --tries=1 --spider http://localhost:10259/healthz || exit 1
 
-# Run the application
-CMD ["./lead-framework"]
+# Run the scheduler
+CMD ["./lead-scheduler"]

@@ -20,22 +20,14 @@ fi
 
 echo "✅ Kubernetes cluster is accessible"
 
-# Create namespace first
-echo "📁 Creating namespace..."
-kubectl apply -f k8s/namespace.yaml
-
 # Apply RBAC
 echo "🔐 Setting up RBAC..."
 kubectl apply -f k8s/rbac.yaml
 
-# Apply ConfigMap
-echo "⚙️  Creating ConfigMap..."
-kubectl apply -f k8s/configmap.yaml
-
-# Deploy LEAD framework
-echo "🎯 Deploying LEAD Framework..."
+# Deploy LEAD scheduler
+echo "🎯 Deploying LEAD Scheduler..."
+kubectl apply -f k8s/scheduler-config.yaml
 kubectl apply -f k8s/lead-deployment.yaml
-kubectl apply -f k8s/lead-service.yaml
 
 # Deploy microservices
 echo "🔧 Deploying microservices..."
@@ -43,25 +35,22 @@ kubectl apply -f k8s/microservices/
 
 # Wait for deployments to be ready
 echo "⏳ Waiting for deployments to be ready..."
-kubectl wait --for=condition=available --timeout=300s deployment/lead-framework -n lead-framework
+kubectl wait --for=condition=available --timeout=300s deployment/lead-scheduler -n kube-system
 
-echo "✅ LEAD Framework deployed successfully!"
+echo "✅ LEAD Scheduler deployed successfully!"
 echo ""
 echo "📋 Useful commands:"
-echo "  Check pod status:"
-echo "    kubectl get pods -n lead-framework"
+echo "  Check scheduler status:"
+echo "    kubectl get pods -n kube-system | grep lead-scheduler"
 echo ""
-echo "  View LEAD Framework logs:"
-echo "    kubectl logs -f deployment/lead-framework -n lead-framework"
+echo "  View scheduler logs:"
+echo "    kubectl logs -f deployment/lead-scheduler -n kube-system"
 echo ""
-echo "  Access LEAD Framework API:"
-echo "    kubectl port-forward svc/lead-framework 8080:80 -n lead-framework"
+echo "  Access scheduler metrics:"
+echo "    kubectl port-forward svc/lead-scheduler 10259:10259 -n kube-system"
 echo ""
-echo "  Check framework status:"
-echo "    curl http://localhost:8080/status"
+echo "  Check scheduler health:"
+echo "    curl http://localhost:10259/healthz"
 echo ""
-echo "  View critical paths:"
-echo "    curl http://localhost:8080/paths"
-echo ""
-echo "  Monitor cluster health:"
-echo "    curl http://localhost:8080/health-summary"
+echo "  View scheduler metrics:"
+echo "    curl http://localhost:10259/metrics"

@@ -57,23 +57,24 @@ func (sa *ScoringAlgorithm) ScorePaths(gateway string) ([]*models.Path, error) {
 }
 
 // calculateScore calculates the score for a single path
+// Enhanced with network topology considerations as per LEAD paper
 func (sa *ScoringAlgorithm) calculateScore(path *models.Path) float64 {
 	// Calculate individual components
 	pathLengthScore := sa.calculatePathLengthScore(path.PathLength)
 	podCountScore := sa.calculatePodCountScore(path.PodCount)
 	edgeCountScore := sa.calculateEdgeCountScore(path.EdgeCount)
 	rpsScore := sa.calculateRPSScore(path.Services)
-	networkScore := sa.calculateNetworkTopologyScore(path.Services)
+	networkScore := sa.calculateEnhancedNetworkTopologyScore(path.Services)
 
 	// Weighted combination of all factors
-	// Original factors (70% weight)
-	originalScore := (pathLengthScore*0.3 + podCountScore*0.25 + edgeCountScore*0.15 + rpsScore*0.3)
+	// Original LEAD factors (60% weight) - reduced to make room for network topology
+	originalScore := (pathLengthScore*0.25 + podCountScore*0.2 + edgeCountScore*0.15 + rpsScore*0.25)
 
-	// Network topology factors (30% weight)
-	networkContribution := networkScore * 0.3
+	// Enhanced network topology factors (40% weight) - increased importance
+	networkContribution := networkScore * 0.4
 
 	// Combine scores
-	finalScore := originalScore*0.7 + networkContribution
+	finalScore := originalScore*0.6 + networkContribution
 
 	return finalScore
 }
@@ -111,10 +112,23 @@ func (sa *ScoringAlgorithm) calculateEdgeCountScore(edgeCount int) float64 {
 
 // calculateRPSScore calculates score based on total RPS in the path
 // Higher RPS indicates more critical path
+// As per LEAD paper: RPS is gathered by monitoring system during runtime
 func (sa *ScoringAlgorithm) calculateRPSScore(services []*models.ServiceNode) float64 {
 	var totalRPS float64
+	var hasRPSData bool
+
 	for _, service := range services {
 		totalRPS += service.RPS
+		if service.RPS > 0 {
+			hasRPSData = true
+		}
+	}
+
+	// If no RPS data is available yet (initial deployment), use default scoring
+	if !hasRPSData {
+		// Use service count as a proxy for expected RPS during initial deployment
+		// This ensures paths with more services get higher scores initially
+		return math.Min(float64(len(services))/10.0, 1.0)
 	}
 
 	// Normalize RPS score (assume max reasonable RPS is 10000)
@@ -126,8 +140,9 @@ func (sa *ScoringAlgorithm) calculateRPSScore(services []*models.ServiceNode) fl
 	return totalRPS / maxRPS
 }
 
-// calculateNetworkTopologyScore calculates score based on network characteristics
-func (sa *ScoringAlgorithm) calculateNetworkTopologyScore(services []*models.ServiceNode) float64 {
+// calculateEnhancedNetworkTopologyScore calculates enhanced score based on network characteristics
+// This is the key enhancement for network topology consideration as per LEAD paper
+func (sa *ScoringAlgorithm) calculateEnhancedNetworkTopologyScore(services []*models.ServiceNode) float64 {
 	if len(services) == 0 {
 		return 0.0
 	}
@@ -135,9 +150,10 @@ func (sa *ScoringAlgorithm) calculateNetworkTopologyScore(services []*models.Ser
 	var totalNetworkScore float64
 	var validServices int
 
+	// Calculate individual service network scores
 	for _, service := range services {
 		if service.NetworkTopology != nil {
-			serviceScore := sa.calculateServiceNetworkScore(service.NetworkTopology)
+			serviceScore := sa.calculateEnhancedServiceNetworkScore(service.NetworkTopology)
 			totalNetworkScore += serviceScore
 			validServices++
 		}
@@ -147,13 +163,37 @@ func (sa *ScoringAlgorithm) calculateNetworkTopologyScore(services []*models.Ser
 		return 0.0
 	}
 
-	return totalNetworkScore / float64(validServices)
+	// Calculate inter-service network optimization score
+	interServiceScore := sa.calculateInterServiceNetworkScore(services)
+
+	// Combine individual service scores with inter-service optimization
+	individualScore := totalNetworkScore / float64(validServices)
+
+	// Weighted combination: 70% individual service scores, 30% inter-service optimization
+	finalScore := individualScore*0.7 + interServiceScore*0.3
+
+	return finalScore
 }
 
-// calculateServiceNetworkScore calculates network score for a single service
-func (sa *ScoringAlgorithm) calculateServiceNetworkScore(topology *models.NetworkTopology) float64 {
+// calculateNetworkTopologyScore calculates score based on network characteristics (legacy method)
+func (sa *ScoringAlgorithm) calculateNetworkTopologyScore(services []*models.ServiceNode) float64 {
+	return sa.calculateEnhancedNetworkTopologyScore(services)
+}
+
+// calculateEnhancedServiceNetworkScore calculates enhanced network score for a single service
+// Includes all network topology parameters: bandwidth, latency, throughput, packet loss, geo distance
+func (sa *ScoringAlgorithm) calculateEnhancedServiceNetworkScore(topology *models.NetworkTopology) float64 {
 	// Bandwidth score (higher is better, normalized to 0-1)
 	bandwidthScore := math.Min(topology.Bandwidth/1000.0, 1.0) // Assume 1000 Mbps is excellent
+
+	// Throughput score (higher is better, normalized to 0-1)
+	throughputScore := math.Min(topology.Throughput/1000.0, 1.0)
+
+	// Latency score (lower is better, normalized to 0-1)
+	latencyScore := math.Max(0.0, 1.0-topology.Latency/100.0) // Assume 100ms is poor
+
+	// Packet loss score (lower is better, normalized to 0-1)
+	packetLossScore := math.Max(0.0, 1.0-topology.PacketLoss/10.0) // Assume 10% is poor
 
 	// Hop score (fewer hops is better)
 	hopScore := 1.0 / math.Max(float64(topology.Hops)+1, 1.0)
@@ -161,13 +201,77 @@ func (sa *ScoringAlgorithm) calculateServiceNetworkScore(topology *models.Networ
 	// Geo distance score (shorter distance is better)
 	distanceScore := 1.0 / math.Max(topology.GeoDistance/100.0+1.0, 1.0) // Normalize by 100km
 
-	// Availability zone diversity bonus (same AZ as gateway gets bonus)
-	azScore := 1.0 // Default score
-
-	// Weighted combination
-	networkScore := bandwidthScore*0.4 + hopScore*0.3 + distanceScore*0.2 + azScore*0.1
+	// Enhanced weighted combination with all network topology parameters
+	networkScore := bandwidthScore*0.25 + throughputScore*0.2 + latencyScore*0.2 +
+		packetLossScore*0.15 + hopScore*0.1 + distanceScore*0.1
 
 	return networkScore
+}
+
+// calculateServiceNetworkScore calculates network score for a single service (legacy method)
+func (sa *ScoringAlgorithm) calculateServiceNetworkScore(topology *models.NetworkTopology) float64 {
+	return sa.calculateEnhancedServiceNetworkScore(topology)
+}
+
+// calculateInterServiceNetworkScore calculates network optimization score between services in a path
+// This implements the LEAD principle of "keeping cooperating services close to each other"
+func (sa *ScoringAlgorithm) calculateInterServiceNetworkScore(services []*models.ServiceNode) float64 {
+	if len(services) < 2 {
+		return 1.0 // Single service gets perfect score
+	}
+
+	var totalOptimizationScore float64
+	var pairCount int
+
+	// Calculate optimization score for each adjacent service pair
+	for i := 0; i < len(services)-1; i++ {
+		service1 := services[i]
+		service2 := services[i+1]
+
+		if service1.NetworkTopology != nil && service2.NetworkTopology != nil {
+			pairScore := sa.calculateServicePairOptimizationScore(service1.NetworkTopology, service2.NetworkTopology)
+			totalOptimizationScore += pairScore
+			pairCount++
+		}
+	}
+
+	if pairCount == 0 {
+		return 0.5 // Default score if no network topology available
+	}
+
+	return totalOptimizationScore / float64(pairCount)
+}
+
+// calculateServicePairOptimizationScore calculates how well two services can be co-located
+// Higher score means better co-location potential (same AZ, low latency, high bandwidth)
+func (sa *ScoringAlgorithm) calculateServicePairOptimizationScore(topology1, topology2 *models.NetworkTopology) float64 {
+	score := 0.0
+
+	// Availability zone co-location bonus
+	if topology1.AvailabilityZone == topology2.AvailabilityZone {
+		score += 0.4 // Strong bonus for same AZ
+	} else {
+		// Check if same region (partial bonus)
+		// This would require region information in the topology
+		score += 0.1 // Small bonus for being in the same region
+	}
+
+	// Bandwidth compatibility (use minimum bandwidth)
+	minBandwidth := math.Min(topology1.Bandwidth, topology2.Bandwidth)
+	bandwidthScore := math.Min(minBandwidth/1000.0, 1.0)
+	score += bandwidthScore * 0.3
+
+	// Latency compatibility (use maximum latency as bottleneck)
+	maxLatency := math.Max(topology1.Latency, topology2.Latency)
+	latencyScore := math.Max(0.0, 1.0-maxLatency/50.0) // Assume 50ms is acceptable
+	score += latencyScore * 0.2
+
+	// Throughput compatibility (use minimum throughput)
+	minThroughput := math.Min(topology1.Throughput, topology2.Throughput)
+	throughputScore := math.Min(minThroughput/1000.0, 1.0)
+	score += throughputScore * 0.1
+
+	return math.Min(score, 1.0) // Cap at 1.0
 }
 
 // GetCriticalPaths returns the top N critical paths

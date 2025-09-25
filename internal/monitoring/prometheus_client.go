@@ -11,6 +11,18 @@ import (
 	"time"
 )
 
+// MetricResult represents a single metric result from Prometheus
+type MetricResult struct {
+	Metric map[string]string `json:"metric"`
+	Value  []interface{}     `json:"value"`
+}
+
+// PrometheusClient interface defines the contract for Prometheus clients
+type PrometheusClient interface {
+	Query(query string) ([]MetricResult, error)
+	QueryRange(query string, start, end time.Time, step time.Duration) ([]MetricResult, error)
+}
+
 // RealPrometheusClient implements actual Prometheus API client
 type RealPrometheusClient struct {
 	baseURL    string
@@ -78,17 +90,17 @@ func (c *RealPrometheusClient) queryPrometheus(query string, start, end time.Tim
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("Prometheus query failed with status %d: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("prometheus query failed with status %d: %s", resp.StatusCode, string(body))
 	}
 
 	// Parse response
 	var promResp PrometheusResponse
 	if err := json.NewDecoder(resp.Body).Decode(&promResp); err != nil {
-		return nil, fmt.Errorf("failed to decode Prometheus response: %v", err)
+		return nil, fmt.Errorf("failed to decode prometheus response: %v", err)
 	}
 
 	if promResp.Status != "success" {
-		return nil, fmt.Errorf("Prometheus query failed: %s", promResp.Status)
+		return nil, fmt.Errorf("prometheus query failed: %s", promResp.Status)
 	}
 
 	return promResp.Data.Result, nil
@@ -128,12 +140,10 @@ func (c *MockPrometheusClient) QueryRange(query string, start, end time.Time, st
 
 // generateMockResponse generates realistic mock data based on query type
 func (c *MockPrometheusClient) generateMockResponse(query string) []MetricResult {
-	results := []MetricResult{}
-
 	// Generate different mock data based on query content
 	if strings.Contains(query, "bandwidth") || strings.Contains(query, "network_receive_bytes") {
 		// Mock bandwidth data
-		results = []MetricResult{
+		return []MetricResult{
 			{
 				Metric: map[string]string{"instance": "node-1"},
 				Value:  []interface{}{time.Now().Unix(), "800.5"},
@@ -149,7 +159,7 @@ func (c *MockPrometheusClient) generateMockResponse(query string) []MetricResult
 		}
 	} else if strings.Contains(query, "latency") || strings.Contains(query, "duration") {
 		// Mock latency data
-		results = []MetricResult{
+		return []MetricResult{
 			{
 				Metric: map[string]string{"service": "frontend"},
 				Value:  []interface{}{time.Now().Unix(), "45.2"},
@@ -165,7 +175,7 @@ func (c *MockPrometheusClient) generateMockResponse(query string) []MetricResult
 		}
 	} else if strings.Contains(query, "throughput") || strings.Contains(query, "transmit_bytes") {
 		// Mock throughput data
-		results = []MetricResult{
+		return []MetricResult{
 			{
 				Metric: map[string]string{"instance": "node-1"},
 				Value:  []interface{}{time.Now().Unix(), "650.3"},
@@ -177,7 +187,7 @@ func (c *MockPrometheusClient) generateMockResponse(query string) []MetricResult
 		}
 	} else if strings.Contains(query, "packet_loss") || strings.Contains(query, "drop") {
 		// Mock packet loss data
-		results = []MetricResult{
+		return []MetricResult{
 			{
 				Metric: map[string]string{"instance": "node-1"},
 				Value:  []interface{}{time.Now().Unix(), "0.05"},
@@ -189,7 +199,7 @@ func (c *MockPrometheusClient) generateMockResponse(query string) []MetricResult
 		}
 	} else if strings.Contains(query, "requests_total") {
 		// Mock request rate data
-		results = []MetricResult{
+		return []MetricResult{
 			{
 				Metric: map[string]string{"service": "frontend"},
 				Value:  []interface{}{time.Now().Unix(), "1500.5"},
@@ -205,13 +215,11 @@ func (c *MockPrometheusClient) generateMockResponse(query string) []MetricResult
 		}
 	} else {
 		// Default mock data
-		results = []MetricResult{
+		return []MetricResult{
 			{
 				Metric: map[string]string{"instance": "default"},
 				Value:  []interface{}{time.Now().Unix(), "100.0"},
 			},
 		}
 	}
-
-	return results
 }

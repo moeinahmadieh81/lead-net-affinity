@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strconv"
+	"strings"
 	"time"
 
 	"lead-framework/internal/models"
@@ -293,6 +295,30 @@ func (kc *KubernetesClient) GetNodes() ([]*NodeInfo, error) {
 			nodeInfo.AvailabilityZone = zone
 		}
 
+		// Extract region
+		region := node.Labels["topology.kubernetes.io/region"]
+		if region == "" {
+			region = node.Labels["failure-domain.beta.kubernetes.io/region"]
+		}
+
+		// Extract instance type
+		instanceType := node.Labels["node.kubernetes.io/instance-type"]
+		if instanceType == "" {
+			instanceType = node.Labels["beta.kubernetes.io/instance-type"]
+		}
+
+		// Create network topology information
+		nodeInfo.NetworkTopology = &NodeNetworkInfo{
+			Bandwidth:        kc.estimateNodeBandwidth(instanceType),
+			Latency:          kc.estimateNodeLatency(nodeInfo.AvailabilityZone, region),
+			Throughput:       kc.estimateNodeThroughput(instanceType),
+			PacketLoss:       0.1, // Default 0.1% packet loss
+			InstanceType:     instanceType,
+			Region:           region,
+			NetworkInterface: kc.determineNetworkInterface(instanceType),
+			LastUpdated:      time.Now(),
+		}
+
 		nodeInfos = append(nodeInfos, nodeInfo)
 	}
 
@@ -307,12 +333,82 @@ type NodeInfo struct {
 	CreationTime     time.Time         `json:"creation_time"`
 	InternalIP       string            `json:"internal_ip"`
 	AvailabilityZone string            `json:"availability_zone"`
+	NetworkTopology  *NodeNetworkInfo  `json:"network_topology,omitempty"`
+}
+
+// NodeNetworkInfo represents network characteristics of a Kubernetes node
+type NodeNetworkInfo struct {
+	Bandwidth        float64   `json:"bandwidth"`         // Mbps
+	Latency          float64   `json:"latency"`           // ms
+	Throughput       float64   `json:"throughput"`        // Mbps
+	PacketLoss       float64   `json:"packet_loss"`       // percentage
+	InstanceType     string    `json:"instance_type"`     // AWS/GCP instance type
+	Region           string    `json:"region"`            // Cloud region
+	NetworkInterface string    `json:"network_interface"` // Network interface type
+	LastUpdated      time.Time `json:"last_updated"`
 }
 
 // Stop stops the Kubernetes client
 func (kc *KubernetesClient) Stop() {
 	kc.cancel()
 	close(kc.eventChan)
+}
+
+// estimateNodeBandwidth estimates bandwidth dynamically from node labels
+func (kc *KubernetesClient) estimateNodeBandwidth(instanceType string) float64 {
+	// Try to extract bandwidth from instance type if it contains bandwidth info
+	// Expected format: "server-1000mbps" or "high-bandwidth-server"
+	if strings.Contains(strings.ToLower(instanceType), "high") || strings.Contains(strings.ToLower(instanceType), "1000") {
+		return 1000.0
+	}
+	if strings.Contains(strings.ToLower(instanceType), "medium") || strings.Contains(strings.ToLower(instanceType), "500") {
+		return 500.0
+	}
+	if strings.Contains(strings.ToLower(instanceType), "low") || strings.Contains(strings.ToLower(instanceType), "100") {
+		return 100.0
+	}
+	if strings.Contains(strings.ToLower(instanceType), "ultra") || strings.Contains(strings.ToLower(instanceType), "10000") {
+		return 10000.0
+	}
+
+	// Default bandwidth for unknown instance types
+	return 1000.0
+}
+
+// estimateNodeLatency estimates latency dynamically from zone labels
+func (kc *KubernetesClient) estimateNodeLatency(availabilityZone, region string) float64 {
+	// Try to extract latency from zone label if it contains latency info
+	// Expected format: "region-zone-latency" or "region-zone-5ms"
+	if latencyStr, exists := kc.extractLatencyFromZone(availabilityZone); exists {
+		if latency, err := strconv.ParseFloat(latencyStr, 64); err == nil {
+			return latency
+		}
+	}
+
+	// If no latency information in zone, use a default
+	// This will be updated by real-time monitoring
+	return 5.0 // Default latency, will be updated by network monitoring
+}
+
+// estimateNodeThroughput estimates throughput based on instance type
+func (kc *KubernetesClient) estimateNodeThroughput(instanceType string) float64 {
+	// Throughput is typically 80-90% of bandwidth due to protocol overhead
+	bandwidth := kc.estimateNodeBandwidth(instanceType)
+	return bandwidth * 0.85 // 85% of bandwidth
+}
+
+// determineNetworkInterface determines network interface type based on instance type
+func (kc *KubernetesClient) determineNetworkInterface(instanceType string) string {
+	// High performance instances typically use enhanced networking
+	highPerfInstances := []string{"c5n", "m5n", "r5n", "i3en", "p3", "p4", "g4dn", "inf1"}
+
+	for _, prefix := range highPerfInstances {
+		if len(instanceType) >= len(prefix) && instanceType[:len(prefix)] == prefix {
+			return "enhanced" // Enhanced networking (SR-IOV, EFA, etc.)
+		}
+	}
+
+	return "standard" // Standard networking
 }
 
 // Helper functions
@@ -336,4 +432,34 @@ func isAlphanumeric(s string) bool {
 		}
 	}
 	return true
+}
+
+// extractLatencyFromZone tries to extract latency information from zone label
+func (kc *KubernetesClient) extractLatencyFromZone(zone string) (string, bool) {
+	// Try to extract latency from zone label
+	// Expected formats: "region-zone-latency", "region-zone-5ms", etc.
+	parts := strings.Split(zone, "-")
+	if len(parts) >= 3 {
+		// Check if last part is a number (latency)
+		lastPart := parts[len(parts)-1]
+		if _, err := strconv.ParseFloat(lastPart, 64); err == nil {
+			return lastPart, true
+		}
+		// Check if last part contains "ms" or latency indicator
+		if strings.Contains(strings.ToLower(lastPart), "ms") {
+			latencyStr := strings.TrimSuffix(strings.ToLower(lastPart), "ms")
+			if _, err := strconv.ParseFloat(latencyStr, 64); err == nil {
+				return latencyStr, true
+			}
+		}
+	}
+
+	// Try to extract from zone label if it contains latency info
+	if strings.Contains(strings.ToLower(zone), "latency") {
+		// Look for latency pattern in the zone string
+		// This is a simple implementation - could be enhanced with regex
+		return "", false
+	}
+
+	return "", false
 }

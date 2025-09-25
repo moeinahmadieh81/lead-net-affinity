@@ -1,0 +1,321 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasources
+  namespace: monitoring
+data:
+  prometheus.yaml: |-
+    {
+        "apiVersion": 1,
+        "datasources": [
+            {
+                "access": "proxy",
+                "editable": true,
+                "name": "prometheus",
+                "orgId": 1,
+                "type": "prometheus",
+                "url": "http://prometheus.monitoring.svc.cluster.local:9090",
+                "version": 1
+            }
+        ]
+    }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-lead-scheduler
+  namespace: monitoring
+data:
+  lead-scheduler-dashboard.json: |
+    {
+      "dashboard": {
+        "id": null,
+        "title": "LEAD Scheduler Dashboard",
+        "tags": ["lead", "scheduler", "kubernetes"],
+        "style": "dark",
+        "timezone": "browser",
+        "panels": [
+          {
+            "id": 1,
+            "title": "Scheduler Status",
+            "type": "stat",
+            "targets": [
+              {
+                "expr": "up{job=\"lead-scheduler\"}",
+                "legendFormat": "Scheduler Up"
+              }
+            ],
+            "fieldConfig": {
+              "defaults": {
+                "color": {
+                  "mode": "thresholds"
+                },
+                "thresholds": {
+                  "steps": [
+                    {
+                      "color": "red",
+                      "value": 0
+                    },
+                    {
+                      "color": "green",
+                      "value": 1
+                    }
+                  ]
+                }
+              }
+            },
+            "gridPos": {
+              "h": 8,
+              "w": 6,
+              "x": 0,
+              "y": 0
+            }
+          },
+          {
+            "id": 2,
+            "title": "Scheduling Decisions per Second",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "rate(lead_scheduler_decisions_total[5m])",
+                "legendFormat": "Decisions/sec"
+              }
+            ],
+            "gridPos": {
+              "h": 8,
+              "w": 6,
+              "x": 6,
+              "y": 0
+            }
+          },
+          {
+            "id": 3,
+            "title": "Service Discovery Duration",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "histogram_quantile(0.95, rate(lead_scheduler_discovery_duration_seconds_bucket[5m]))",
+                "legendFormat": "95th percentile"
+              },
+              {
+                "expr": "histogram_quantile(0.50, rate(lead_scheduler_discovery_duration_seconds_bucket[5m]))",
+                "legendFormat": "50th percentile"
+              }
+            ],
+            "gridPos": {
+              "h": 8,
+              "w": 6,
+              "x": 12,
+              "y": 0
+            }
+          },
+          {
+            "id": 4,
+            "title": "Scoring Duration",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "histogram_quantile(0.95, rate(lead_scheduler_scoring_duration_seconds_bucket[5m]))",
+                "legendFormat": "95th percentile"
+              },
+              {
+                "expr": "histogram_quantile(0.50, rate(lead_scheduler_scoring_duration_seconds_bucket[5m]))",
+                "legendFormat": "50th percentile"
+              }
+            ],
+            "gridPos": {
+              "h": 8,
+              "w": 6,
+              "x": 18,
+              "y": 0
+            }
+          },
+          {
+            "id": 5,
+            "title": "Services Discovered",
+            "type": "stat",
+            "targets": [
+              {
+                "expr": "lead_scheduler_services_discovered_total",
+                "legendFormat": "Total Services"
+              }
+            ],
+            "gridPos": {
+              "h": 8,
+              "w": 6,
+              "x": 0,
+              "y": 8
+            }
+          },
+          {
+            "id": 6,
+            "title": "Network Topology Analysis",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "rate(lead_scheduler_network_analysis_total[5m])",
+                "legendFormat": "Analysis/sec"
+              }
+            ],
+            "gridPos": {
+              "h": 8,
+              "w": 6,
+              "x": 6,
+              "y": 8
+            }
+          },
+          {
+            "id": 7,
+            "title": "Affinity Rules Generated",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "rate(lead_scheduler_affinity_rules_generated_total[5m])",
+                "legendFormat": "Rules/sec"
+              }
+            ],
+            "gridPos": {
+              "h": 8,
+              "w": 6,
+              "x": 12,
+              "y": 8
+            }
+          },
+          {
+            "id": 8,
+            "title": "Error Rate",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "rate(lead_scheduler_errors_total[5m])",
+                "legendFormat": "Errors/sec"
+              }
+            ],
+            "gridPos": {
+              "h": 8,
+              "w": 6,
+              "x": 18,
+              "y": 8
+            }
+          },
+          {
+            "id": 9,
+            "title": "Hotel Reservation Services Status",
+            "type": "table",
+            "targets": [
+              {
+                "expr": "up{job=\"hotel-reservation-services\"}",
+                "format": "table",
+                "instant": true
+              }
+            ],
+            "gridPos": {
+              "h": 8,
+              "w": 12,
+              "x": 0,
+              "y": 16
+            }
+          },
+          {
+            "id": 10,
+            "title": "Pod Distribution by Node",
+            "type": "piechart",
+            "targets": [
+              {
+                "expr": "count by (kubernetes_node) (kube_pod_info{namespace=\"default\"})",
+                "legendFormat": "{{kubernetes_node}}"
+              }
+            ],
+            "gridPos": {
+              "h": 8,
+              "w": 12,
+              "x": 12,
+              "y": 16
+            }
+          }
+        ],
+        "time": {
+          "from": "now-1h",
+          "to": "now"
+        },
+        "refresh": "5s"
+      }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: monitoring
+  labels:
+    app: grafana
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      labels:
+        app: grafana
+    spec:
+      containers:
+      - name: grafana
+        image: grafana/grafana:10.0.0
+        ports:
+        - containerPort: 3000
+        env:
+        - name: GF_SECURITY_ADMIN_PASSWORD
+          value: "admin"
+        - name: GF_USERS_ALLOW_SIGN_UP
+          value: "false"
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        volumeMounts:
+        - name: grafana-storage
+          mountPath: /var/lib/grafana
+        - name: grafana-datasources
+          mountPath: /etc/grafana/provisioning/datasources
+        - name: grafana-dashboard-lead-scheduler
+          mountPath: /etc/grafana/provisioning/dashboards
+        livenessProbe:
+          httpGet:
+            path: /api/health
+            port: 3000
+          initialDelaySeconds: 30
+          timeoutSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /api/health
+            port: 3000
+          initialDelaySeconds: 30
+          timeoutSeconds: 30
+      volumes:
+      - name: grafana-storage
+        emptyDir: {}
+      - name: grafana-datasources
+        configMap:
+          name: grafana-datasources
+      - name: grafana-dashboard-lead-scheduler
+        configMap:
+          name: grafana-dashboard-lead-scheduler
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+  namespace: monitoring
+  labels:
+    app: grafana
+spec:
+  selector:
+    app: grafana
+  ports:
+  - port: 3000
+    targetPort: 3000
+  type: ClusterIP

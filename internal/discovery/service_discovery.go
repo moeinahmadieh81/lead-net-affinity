@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -153,8 +155,9 @@ func (sd *ServiceDiscovery) createServiceNodeFromPods(serviceName string, pods [
 		}
 	}
 
-	// Estimate RPS based on service type and resources
-	rps := sd.estimateRPS(serviceName, replicas, totalCPU)
+	// RPS will be gathered by monitoring system during runtime (as per LEAD paper)
+	// Set initial RPS to 0 - it will be updated by monitoring system
+	rps := 0.0
 
 	// Create network topology based on node distribution
 	networkTopology := sd.createNetworkTopology(pods)
@@ -194,6 +197,9 @@ func (sd *ServiceDiscovery) createNetworkTopology(pods []*models.PodInfo) *model
 			Bandwidth:        500,
 			Hops:             1,
 			GeoDistance:      100,
+			Throughput:       425, // 85% of bandwidth
+			Latency:          5.0, // Default latency
+			PacketLoss:       0.1, // Default packet loss
 		}
 	}
 
@@ -235,85 +241,80 @@ func (sd *ServiceDiscovery) createNetworkTopology(pods []*models.PodInfo) *model
 		Bandwidth:        bandwidth,
 		Hops:             hops,
 		GeoDistance:      geoDistance,
+		Throughput:       bandwidth * 0.85, // Estimate throughput as 85% of bandwidth
+		Latency:          1.0,              // Default latency, will be updated by monitoring
+		PacketLoss:       0.1,              // Default packet loss, will be updated by monitoring
 	}
 }
 
-// estimateRPS estimates requests per second based on service characteristics
-func (sd *ServiceDiscovery) estimateRPS(serviceName string, replicas int, cpu float64) float64 {
-	// Base RPS estimates for HotelReservation services
-	baseRPS := map[string]float64{
-		"frontend":       1000,
-		"search":         800,
-		"user":           600,
-		"recommendation": 400,
-		"reservation":    700,
-		"profile":        500,
-		"rate":           300,
-		"geo":            200,
-	}
-
-	rps, exists := baseRPS[serviceName]
-	if !exists {
-		rps = 100 // Default for unknown services
-	}
-
-	// Scale by replicas and CPU
-	rps = rps * float64(replicas) * (1 + cpu)
-
-	return rps
-}
-
-// estimateBandwidth estimates network bandwidth
+// estimateBandwidth estimates network bandwidth dynamically from node labels
 func (sd *ServiceDiscovery) estimateBandwidth(pod *models.PodInfo) float64 {
-	// Simplified bandwidth estimation based on service type
-	bandwidthMap := map[string]float64{
-		"microservice": 800,
-		"mongodb":      600,
-		"memcached":    500,
+	// Get node information to extract bandwidth from labels
+	nodes, err := sd.k8sClient.GetNodes()
+	if err != nil {
+		log.Printf("Failed to get nodes for bandwidth estimation: %v", err)
+		return 1000.0 // Default fallback
 	}
 
-	bandwidth, exists := bandwidthMap[pod.ServiceType]
-	if !exists {
-		bandwidth = 500 // Default
+	// Find the node where this pod is running
+	for _, node := range nodes {
+		if node.Name == pod.NodeName {
+			// Try to extract bandwidth from node labels
+			if bandwidthStr, exists := node.Labels["network.bandwidth.mbps"]; exists {
+				if bandwidth, err := strconv.ParseFloat(bandwidthStr, 64); err == nil {
+					return bandwidth
+				}
+			}
+
+			// Try alternative label formats
+			if bandwidthStr, exists := node.Labels["bandwidth"]; exists {
+				if bandwidth, err := strconv.ParseFloat(bandwidthStr, 64); err == nil {
+					return bandwidth
+				}
+			}
+
+			// Try to extract from instance type if available
+			if instanceType, exists := node.Labels["node.kubernetes.io/instance-type"]; exists {
+				return sd.estimateBandwidthFromInstanceType(instanceType)
+			}
+
+			// Default based on service type if no labels available
+			return sd.getDefaultBandwidthForServiceType(pod.ServiceType)
+		}
 	}
 
-	return bandwidth
+	return 1000.0 // Default fallback
 }
 
-// estimateHops estimates network hops
+// estimateHops estimates network hops dynamically from service characteristics
 func (sd *ServiceDiscovery) estimateHops(serviceType string) int {
-	// Simplified hop estimation
-	hopMap := map[string]int{
-		"microservice": 1,
-		"mongodb":      2,
-		"memcached":    2,
+	// Dynamic hop estimation based on service type characteristics
+	// Database services typically have more hops due to additional network layers
+	switch serviceType {
+	case "mongodb", "database", "postgresql", "mysql":
+		return 2 // Database services typically have 2 hops
+	case "memcached", "redis", "cache":
+		return 2 // Cache services typically have 2 hops
+	case "frontend", "gateway":
+		return 1 // Frontend services typically have 1 hop
+	default:
+		return 1 // Default for microservices
 	}
-
-	hops, exists := hopMap[serviceType]
-	if !exists {
-		hops = 1 // Default
-	}
-
-	return hops
 }
 
-// estimateGeoDistance estimates geographic distance
+// estimateGeoDistance estimates geographic distance dynamically from zone labels
 func (sd *ServiceDiscovery) estimateGeoDistance(zone string) float64 {
-	// Simplified geo distance estimation
-	distanceMap := map[string]float64{
-		"us-west-1a": 0,
-		"us-west-1b": 100,
-		"us-west-1c": 200,
-		"us-east-1a": 3000,
-		"us-east-1b": 3100,
+	// Try to extract distance from zone label if it contains distance information
+	// Expected format: "region-zone-distance" or "region-zone" with distance in label
+	if distanceStr, exists := sd.extractDistanceFromZone(zone); exists {
+		if distance, err := strconv.ParseFloat(distanceStr, 64); err == nil {
+			return distance
+		}
 	}
 
-	distance, exists := distanceMap[zone]
-	if !exists {
-		distance = 100 // Default
-	}
-
-	return distance
+	// If no distance information in zone, use a default based on zone characteristics
+	// This will be updated by real-time monitoring
+	return 100.0 // Default distance, will be updated by network monitoring
 }
 
 // addHotelReservationDependencies adds the known dependencies for HotelReservation benchmark
@@ -335,6 +336,71 @@ func (sd *ServiceDiscovery) addHotelReservationDependencies() {
 			}
 		}
 	}
+}
+
+// estimateBandwidthFromInstanceType estimates bandwidth from instance type label
+func (sd *ServiceDiscovery) estimateBandwidthFromInstanceType(instanceType string) float64 {
+	// Try to extract bandwidth from instance type if it contains bandwidth info
+	// Expected format: "server-1000mbps" or "high-bandwidth-server"
+	if strings.Contains(strings.ToLower(instanceType), "high") || strings.Contains(strings.ToLower(instanceType), "1000") {
+		return 1000.0
+	}
+	if strings.Contains(strings.ToLower(instanceType), "medium") || strings.Contains(strings.ToLower(instanceType), "500") {
+		return 500.0
+	}
+	if strings.Contains(strings.ToLower(instanceType), "low") || strings.Contains(strings.ToLower(instanceType), "100") {
+		return 100.0
+	}
+
+	// Default bandwidth for unknown instance types
+	return 800.0
+}
+
+// getDefaultBandwidthForServiceType returns default bandwidth based on service type
+func (sd *ServiceDiscovery) getDefaultBandwidthForServiceType(serviceType string) float64 {
+	// Default bandwidth based on service type characteristics
+	switch serviceType {
+	case "frontend", "gateway":
+		return 1000.0 // Frontend services need higher bandwidth
+	case "microservice":
+		return 800.0 // Standard microservice bandwidth
+	case "mongodb", "database":
+		return 600.0 // Database services
+	case "memcached", "cache":
+		return 500.0 // Cache services
+	default:
+		return 800.0 // Default bandwidth
+	}
+}
+
+// extractDistanceFromZone tries to extract distance information from zone label
+func (sd *ServiceDiscovery) extractDistanceFromZone(zone string) (string, bool) {
+	// Try to extract distance from zone label
+	// Expected formats: "region-zone-distance", "region-zone-100km", etc.
+	parts := strings.Split(zone, "-")
+	if len(parts) >= 3 {
+		// Check if last part is a number (distance)
+		lastPart := parts[len(parts)-1]
+		if _, err := strconv.ParseFloat(lastPart, 64); err == nil {
+			return lastPart, true
+		}
+		// Check if last part contains "km" or distance indicator
+		if strings.Contains(strings.ToLower(lastPart), "km") {
+			distanceStr := strings.TrimSuffix(strings.ToLower(lastPart), "km")
+			if _, err := strconv.ParseFloat(distanceStr, 64); err == nil {
+				return distanceStr, true
+			}
+		}
+	}
+
+	// Try to extract from zone label if it contains distance info
+	if strings.Contains(strings.ToLower(zone), "distance") {
+		// Look for distance pattern in the zone string
+		// This is a simple implementation - could be enhanced with regex
+		return "", false
+	}
+
+	return "", false
 }
 
 // watchPodEvents watches for pod events and updates the service graph

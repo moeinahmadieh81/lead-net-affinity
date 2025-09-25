@@ -253,6 +253,10 @@ func (ma *MonitoringAlgorithm) UpdateMetrics(serviceID string, metrics *ServiceM
 	metrics.ServiceID = serviceID
 	metrics.LastUpdated = time.Now()
 	ma.monitoringData[serviceID] = metrics
+
+	// Update RPS in service graph as per LEAD paper
+	// "RPS, though not available at the initial deployment, would be gathered by the monitoring system"
+	ma.updateServiceRPS(serviceID, metrics.RequestRate)
 }
 
 // GetMetrics returns current metrics for a service
@@ -339,6 +343,15 @@ func (ma *MonitoringAlgorithm) GetHealthSummary() *HealthSummary {
 	}
 
 	return summary
+}
+
+// updateServiceRPS updates the RPS value in the service graph
+// This implements the LEAD paper requirement: "RPS would be gathered by the monitoring system"
+func (ma *MonitoringAlgorithm) updateServiceRPS(serviceID string, rps float64) {
+	if service, exists := ma.graph.GetNode(serviceID); exists {
+		service.RPS = rps
+		log.Printf("Updated RPS for service %s to %.2f (gathered by monitoring system)", serviceID, rps)
+	}
 }
 
 // HealthSummary contains a summary of service health

@@ -1,68 +1,55 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: lead-framework
-  namespace: lead-framework
+  name: lead-scheduler
+  namespace: kube-system
   labels:
-    app: lead-framework
-    component: orchestrator
+    app: lead-scheduler
+    component: scheduler
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: lead-framework
+      app: lead-scheduler
   template:
     metadata:
       labels:
-        app: lead-framework
-        component: orchestrator
+        app: lead-scheduler
+        component: scheduler
       annotations:
         prometheus.io/scrape: "true"
-        prometheus.io/port: "8080"
+        prometheus.io/port: "10259"
         prometheus.io/path: "/metrics"
     spec:
-      serviceAccountName: lead-framework
+      serviceAccountName: lead-scheduler
       containers:
-      - name: lead-framework
-        image: lead-framework:latest
+      - name: lead-scheduler
+        image: lead-scheduler:latest
         imagePullPolicy: IfNotPresent
+        command:
+        - /lead-scheduler
+        - --config=/app/config/scheduler-config.yaml
+        - --kubeconfig=/app/config/kubeconfig
+        - --port=10259
         ports:
-        - containerPort: 8080
-          name: http
+        - containerPort: 10259
+          name: metrics
           protocol: TCP
         env:
         - name: LEAD_CONFIG_PATH
-          value: "/app/config/service_config.json"
+          value: "/app/config/scheduler-config.yaml"
         - name: PROMETHEUS_URL
-          valueFrom:
-            configMapKeyRef:
-              name: lead-config
-              key: prometheus_url
+          value: "http://prometheus.monitoring.svc.cluster.local:9090"
         - name: MONITORING_INTERVAL
-          valueFrom:
-            configMapKeyRef:
-              name: lead-config
-              key: monitoring_interval
+          value: "15s"
         - name: RESOURCE_THRESHOLD
-          valueFrom:
-            configMapKeyRef:
-              name: lead-config
-              key: resource_threshold
+          value: "80.0"
         - name: LATENCY_THRESHOLD
-          valueFrom:
-            configMapKeyRef:
-              name: lead-config
-              key: latency_threshold
+          value: "150ms"
         - name: KUBERNETES_NAMESPACE
-          valueFrom:
-            configMapKeyRef:
-              name: lead-config
-              key: kubernetes_namespace
+          value: "default"
         - name: OUTPUT_DIRECTORY
-          valueFrom:
-            configMapKeyRef:
-              name: lead-config
-              key: output_directory
+          value: "/app/k8s-manifests"
         volumeMounts:
         - name: config-volume
           mountPath: /app/config
@@ -77,16 +64,16 @@ spec:
             memory: 512Mi
         livenessProbe:
           httpGet:
-            path: /health
-            port: 8080
+            path: /healthz
+            port: 10259
           initialDelaySeconds: 30
           periodSeconds: 10
           timeoutSeconds: 5
           failureThreshold: 3
         readinessProbe:
           httpGet:
-            path: /ready
-            port: 8080
+            path: /readyz
+            port: 10259
           initialDelaySeconds: 5
           periodSeconds: 5
           timeoutSeconds: 3
@@ -103,7 +90,7 @@ spec:
       volumes:
       - name: config-volume
         configMap:
-          name: lead-config
+          name: scheduler-config
       - name: manifests-volume
         emptyDir: {}
       nodeSelector:
@@ -121,3 +108,23 @@ spec:
               - key: "node-role.kubernetes.io/worker"
                 operator: In
                 values: ["true"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: lead-scheduler
+  namespace: kube-system
+  labels:
+    app: lead-scheduler
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "10259"
+spec:
+  type: ClusterIP
+  ports:
+  - port: 10259
+    targetPort: 10259
+    protocol: TCP
+    name: metrics
+  selector:
+    app: lead-scheduler

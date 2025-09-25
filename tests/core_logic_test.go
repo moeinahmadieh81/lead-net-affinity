@@ -159,7 +159,7 @@ func testAffinityRuleGenerationCore(t *testing.T) {
 			continue
 		}
 
-		if rules == nil || len(rules) == 0 {
+		if len(rules) == 0 {
 			t.Errorf("No affinity rules generated for path %d", i)
 			continue
 		}

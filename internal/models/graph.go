@@ -12,6 +12,9 @@ type NetworkTopology struct {
 	Bandwidth        float64 `json:"bandwidth"`         // Mbps
 	Hops             int     `json:"hops"`              // Number of network hops from gateway
 	GeoDistance      float64 `json:"geo_distance"`      // Distance in km from gateway
+	Throughput       float64 `json:"throughput"`        // Actual throughput in Mbps
+	Latency          float64 `json:"latency"`           // Network latency in ms
+	PacketLoss       float64 `json:"packet_loss"`       // Packet loss percentage
 }
 
 // ServiceNode represents a microservice in the service mesh

@@ -2,9 +2,14 @@ package monitoring
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"math/rand"
+	"net/http"
+	"net/url"
+	"strconv"
 	"time"
 
 	"lead-framework/internal/algorithms"
@@ -12,14 +17,27 @@ import (
 )
 
 // PrometheusMonitor implements Prometheus-based monitoring for LEAD framework
-// Note: This is a simplified implementation without external Prometheus dependencies
-// In a production environment, you would integrate with actual Prometheus client libraries
+// Now uses real Prometheus queries as per LEAD paper requirements
 type PrometheusMonitor struct {
-	queries   *PrometheusQueries
-	interval  time.Duration
-	ctx       context.Context
-	cancel    context.CancelFunc
-	simulated bool // Flag to indicate if we're using simulated data
+	queries       *PrometheusQueries
+	interval      time.Duration
+	ctx           context.Context
+	cancel        context.CancelFunc
+	simulated     bool // Flag to indicate if we're using simulated data
+	prometheusURL string
+	httpClient    *http.Client
+}
+
+// PrometheusQueryResponse represents the response from Prometheus API
+type PrometheusQueryResponse struct {
+	Status string `json:"status"`
+	Data   struct {
+		ResultType string `json:"resultType"`
+		Result     []struct {
+			Metric map[string]string `json:"metric"`
+			Value  []interface{}     `json:"value"`
+		} `json:"result"`
+	} `json:"data"`
 }
 
 // PrometheusQueries contains Prometheus query templates
@@ -44,20 +62,33 @@ func DefaultPrometheusQueries() *PrometheusQueries {
 	}
 }
 
-// NewPrometheusMonitor creates a new Prometheus monitor (simplified version)
+// NewPrometheusMonitor creates a new Prometheus monitor with real querying capability
 func NewPrometheusMonitor(prometheusURL string, interval time.Duration) (*PrometheusMonitor, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	// For this implementation, we'll use simulated data
-	// In production, you would initialize actual Prometheus client here
-	log.Printf("Initializing Prometheus monitor (simulated mode) for URL: %s", prometheusURL)
+	// Create HTTP client with timeout
+	httpClient := &http.Client{
+		Timeout: 30 * time.Second,
+	}
+
+	// Test connection to Prometheus
+	simulated := false
+	if err := testPrometheusConnection(prometheusURL, httpClient); err != nil {
+		log.Printf("Warning: Cannot connect to Prometheus at %s: %v", prometheusURL, err)
+		log.Println("Falling back to simulated mode")
+		simulated = true
+	} else {
+		log.Printf("Successfully connected to Prometheus at %s", prometheusURL)
+	}
 
 	return &PrometheusMonitor{
-		queries:   DefaultPrometheusQueries(),
-		interval:  interval,
-		ctx:       ctx,
-		cancel:    cancel,
-		simulated: true,
+		queries:       DefaultPrometheusQueries(),
+		interval:      interval,
+		ctx:           ctx,
+		cancel:        cancel,
+		simulated:     simulated,
+		prometheusURL: prometheusURL,
+		httpClient:    httpClient,
 	}, nil
 }
 
@@ -121,7 +152,8 @@ func (pm *PrometheusMonitor) updateAllServiceMetrics(
 	}
 }
 
-// collectServiceMetrics collects metrics for a specific service (simulated)
+// collectServiceMetrics collects metrics for a specific service using real Prometheus queries
+// This implements the LEAD paper requirement: "RPS would be gathered by the monitoring system"
 func (pm *PrometheusMonitor) collectServiceMetrics(serviceID string) (*algorithms.ServiceMetrics, error) {
 	metrics := &algorithms.ServiceMetrics{
 		ServiceID:   serviceID,
@@ -130,14 +162,59 @@ func (pm *PrometheusMonitor) collectServiceMetrics(serviceID string) (*algorithm
 	}
 
 	if pm.simulated {
-		// Generate simulated metrics based on service characteristics
-		// In production, these would come from actual Prometheus queries
+		// Fallback to simulated metrics if Prometheus is not available
 		metrics.CPUUsage = pm.simulateCPUUsage(serviceID)
 		metrics.MemoryUsage = pm.simulateMemoryUsage(serviceID)
 		metrics.RequestRate = pm.simulateRequestRate(serviceID)
 		metrics.ErrorRate = pm.simulateErrorRate(serviceID)
 		metrics.ResponseTime = pm.simulateResponseTime(serviceID)
 		metrics.NetworkLatency = pm.simulateNetworkLatency(serviceID)
+		metrics.IsHealthy = pm.determineHealthStatus(metrics)
+	} else {
+		// Use real Prometheus queries as per LEAD paper
+		var err error
+
+		// Collect CPU usage
+		if metrics.CPUUsage, err = pm.queryPrometheusMetric(pm.queries.CPUUsage, serviceID); err != nil {
+			log.Printf("Failed to get CPU usage for %s: %v", serviceID, err)
+			metrics.CPUUsage = pm.simulateCPUUsage(serviceID) // Fallback
+		}
+
+		// Collect memory usage
+		if metrics.MemoryUsage, err = pm.queryPrometheusMetric(pm.queries.MemoryUsage, serviceID); err != nil {
+			log.Printf("Failed to get memory usage for %s: %v", serviceID, err)
+			metrics.MemoryUsage = pm.simulateMemoryUsage(serviceID) // Fallback
+		}
+
+		// Collect request rate (RPS) - This is the key metric for LEAD paper
+		if metrics.RequestRate, err = pm.queryPrometheusMetric(pm.queries.RequestRate, serviceID); err != nil {
+			log.Printf("Failed to get request rate for %s: %v", serviceID, err)
+			metrics.RequestRate = pm.simulateRequestRate(serviceID) // Fallback
+		}
+
+		// Collect error rate
+		if metrics.ErrorRate, err = pm.queryPrometheusMetric(pm.queries.ErrorRate, serviceID); err != nil {
+			log.Printf("Failed to get error rate for %s: %v", serviceID, err)
+			metrics.ErrorRate = pm.simulateErrorRate(serviceID) // Fallback
+		}
+
+		// Collect response time
+		if responseTimeMs, err := pm.queryPrometheusMetric(pm.queries.ResponseTime, serviceID); err != nil {
+			log.Printf("Failed to get response time for %s: %v", serviceID, err)
+			metrics.ResponseTime = pm.simulateResponseTime(serviceID) // Fallback
+		} else {
+			metrics.ResponseTime = time.Duration(responseTimeMs) * time.Millisecond
+		}
+
+		// Collect network latency
+		if latencyMs, err := pm.queryPrometheusMetric(pm.queries.Latency, serviceID); err != nil {
+			log.Printf("Failed to get network latency for %s: %v", serviceID, err)
+			metrics.NetworkLatency = pm.simulateNetworkLatency(serviceID) // Fallback
+		} else {
+			metrics.NetworkLatency = time.Duration(latencyMs) * time.Millisecond
+		}
+
+		// Determine health status
 		metrics.IsHealthy = pm.determineHealthStatus(metrics)
 	}
 
@@ -342,23 +419,134 @@ func (pm *PrometheusMonitor) GetPrometheusQueries() *PrometheusQueries {
 	return pm.queries
 }
 
-// ValidatePrometheusConnection validates the connection to Prometheus (simulated)
+// queryPrometheusMetric queries a specific metric from Prometheus
+func (pm *PrometheusMonitor) queryPrometheusMetric(queryTemplate, serviceID string) (float64, error) {
+	// Format the query with service ID
+	query := fmt.Sprintf(queryTemplate, serviceID)
+
+	// Build the Prometheus API URL
+	apiURL := fmt.Sprintf("%s/api/v1/query", pm.prometheusURL)
+	params := url.Values{}
+	params.Set("query", query)
+
+	// Make HTTP request to Prometheus
+	req, err := http.NewRequestWithContext(pm.ctx, "GET", apiURL+"?"+params.Encode(), nil)
+	if err != nil {
+		return 0, fmt.Errorf("failed to create request: %v", err)
+	}
+
+	resp, err := pm.httpClient.Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("failed to query Prometheus: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("prometheus returned status %d", resp.StatusCode)
+	}
+
+	// Parse response
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, fmt.Errorf("failed to read response: %v", err)
+	}
+
+	var queryResp PrometheusQueryResponse
+	if err := json.Unmarshal(body, &queryResp); err != nil {
+		return 0, fmt.Errorf("failed to parse response: %v", err)
+	}
+
+	if queryResp.Status != "success" {
+		return 0, fmt.Errorf("prometheus query failed: %s", queryResp.Status)
+	}
+
+	// Extract metric value
+	if len(queryResp.Data.Result) == 0 {
+		return 0, fmt.Errorf("no data returned for query")
+	}
+
+	// Get the first result value
+	value := queryResp.Data.Result[0].Value[1]
+	valueStr, ok := value.(string)
+	if !ok {
+		return 0, fmt.Errorf("invalid value type in response")
+	}
+
+	// Convert to float64
+	metricValue, err := strconv.ParseFloat(valueStr, 64)
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse metric value: %v", err)
+	}
+
+	return metricValue, nil
+}
+
+// testPrometheusConnection tests the connection to Prometheus
+func testPrometheusConnection(prometheusURL string, client *http.Client) error {
+	// Test with a simple query
+	testURL := fmt.Sprintf("%s/api/v1/query?query=up", prometheusURL)
+
+	resp, err := client.Get(testURL)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("prometheus returned status %d", resp.StatusCode)
+	}
+
+	return nil
+}
+
+// ValidatePrometheusConnection validates the connection to Prometheus
 func (pm *PrometheusMonitor) ValidatePrometheusConnection() error {
 	if pm.simulated {
 		log.Println("Prometheus connection validation (simulated): OK")
 		return nil
 	}
 
-	// In production, you would validate actual Prometheus connection here
-	return fmt.Errorf("prometheus connection not available in simulated mode")
+	return testPrometheusConnection(pm.prometheusURL, pm.httpClient)
 }
 
-// GetPrometheusVersion returns the Prometheus version (simulated)
+// GetPrometheusVersion returns the Prometheus version
 func (pm *PrometheusMonitor) GetPrometheusVersion() (string, error) {
 	if pm.simulated {
 		return "simulated-v1.0.0", nil
 	}
 
-	// In production, you would get actual Prometheus version here
-	return "", fmt.Errorf("prometheus version not available in simulated mode")
+	// Query Prometheus version endpoint
+	versionURL := fmt.Sprintf("%s/api/v1/status/buildinfo", pm.prometheusURL)
+
+	resp, err := pm.httpClient.Get(versionURL)
+	if err != nil {
+		return "", fmt.Errorf("failed to get Prometheus version: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("prometheus returned status %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read version response: %v", err)
+	}
+
+	var versionResp struct {
+		Status string `json:"status"`
+		Data   struct {
+			Version string `json:"version"`
+		} `json:"data"`
+	}
+
+	if err := json.Unmarshal(body, &versionResp); err != nil {
+		return "", fmt.Errorf("failed to parse version response: %v", err)
+	}
+
+	if versionResp.Status != "success" {
+		return "", fmt.Errorf("prometheus version query failed: %s", versionResp.Status)
+	}
+
+	return versionResp.Data.Version, nil
 }

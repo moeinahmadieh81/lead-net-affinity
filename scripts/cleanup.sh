@@ -25,29 +25,19 @@ echo "🗑️  Deleting LEAD Framework resources..."
 echo "🔧 Deleting microservices..."
 kubectl delete -f k8s/microservices/ --ignore-not-found=true
 
-# Delete LEAD framework
-echo "🎯 Deleting LEAD Framework..."
+# Delete LEAD scheduler
+echo "🎯 Deleting LEAD Scheduler..."
 kubectl delete -f k8s/lead-deployment.yaml --ignore-not-found=true
-kubectl delete -f k8s/lead-service.yaml --ignore-not-found=true
 
-# Delete ConfigMap
-echo "⚙️  Deleting ConfigMap..."
-kubectl delete -f k8s/configmap.yaml --ignore-not-found=true
+# Delete scheduler config
+echo "⚙️  Deleting scheduler config..."
+kubectl delete -f k8s/scheduler-config.yaml --ignore-not-found=true
 
 # Delete RBAC
 echo "🔐 Deleting RBAC..."
 kubectl delete -f k8s/rbac.yaml --ignore-not-found=true
 
-# Delete namespace (this will delete everything in the namespace)
-echo "📁 Deleting namespace..."
-kubectl delete -f k8s/namespace.yaml --ignore-not-found=true
-
-# Wait for namespace to be deleted
-echo "⏳ Waiting for namespace deletion..."
-kubectl wait --for=delete namespace/lead-framework --timeout=60s || true
-
 echo "✅ Cleanup completed successfully!"
 echo ""
 echo "📋 To verify cleanup:"
-echo "  kubectl get all -n lead-framework"
-echo "  kubectl get namespace lead-framework"
+echo "  kubectl get pods -n kube-system | grep lead-scheduler"
