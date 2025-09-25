@@ -149,12 +149,16 @@ data:
           },
           {
             "id": 6,
-            "title": "Network Topology Analysis",
+            "title": "Dynamic Network Topology Discovery",
             "type": "graph",
             "targets": [
               {
-                "expr": "rate(lead_scheduler_network_analysis_total[5m])",
-                "legendFormat": "Analysis/sec"
+                "expr": "rate(lead_scheduler_network_topology_discovery_total[5m])",
+                "legendFormat": "Discovery/sec"
+              },
+              {
+                "expr": "lead_scheduler_nodes_discovered_total",
+                "legendFormat": "Nodes Discovered"
               }
             ],
             "gridPos": {
@@ -228,9 +232,137 @@ data:
             ],
             "gridPos": {
               "h": 8,
-              "w": 12,
+              "w": 6,
               "x": 12,
               "y": 16
+            }
+          },
+          {
+            "id": 11,
+            "title": "Inter-Node Network Latency",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "lead_scheduler_inter_node_latency_ms",
+                "legendFormat": "{{node1}} -> {{node2}}"
+              }
+            ],
+            "gridPos": {
+              "h": 8,
+              "w": 6,
+              "x": 18,
+              "y": 16
+            }
+          },
+          {
+            "id": 12,
+            "title": "Node Network Bandwidth",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "lead_scheduler_node_bandwidth_mbps",
+                "legendFormat": "{{node}}"
+              }
+            ],
+            "gridPos": {
+              "h": 8,
+              "w": 6,
+              "x": 0,
+              "y": 24
+            }
+          },
+          {
+            "id": 13,
+            "title": "Geographic Distance Distribution",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "lead_scheduler_geo_distance_km",
+                "legendFormat": "{{node1}} -> {{node2}}"
+              }
+            ],
+            "gridPos": {
+              "h": 8,
+              "w": 6,
+              "x": 6,
+              "y": 24
+            }
+          },
+          {
+            "id": 14,
+            "title": "Network Topology Discovery Status",
+            "type": "stat",
+            "targets": [
+              {
+                "expr": "lead_scheduler_network_topology_discovery_success_rate",
+                "legendFormat": "Success Rate"
+              }
+            ],
+            "fieldConfig": {
+              "defaults": {
+                "unit": "percent",
+                "color": {
+                  "mode": "thresholds"
+                },
+                "thresholds": {
+                  "steps": [
+                    {
+                      "color": "red",
+                      "value": 0
+                    },
+                    {
+                      "color": "yellow",
+                      "value": 80
+                    },
+                    {
+                      "color": "green",
+                      "value": 95
+                    }
+                  ]
+                }
+              }
+            },
+            "gridPos": {
+              "h": 8,
+              "w": 6,
+              "x": 12,
+              "y": 24
+            }
+          },
+          {
+            "id": 15,
+            "title": "Dynamic Network Monitor Status",
+            "type": "stat",
+            "targets": [
+              {
+                "expr": "up{job=\"lead-scheduler\"}",
+                "legendFormat": "Dynamic Monitor"
+              }
+            ],
+            "fieldConfig": {
+              "defaults": {
+                "color": {
+                  "mode": "thresholds"
+                },
+                "thresholds": {
+                  "steps": [
+                    {
+                      "color": "red",
+                      "value": 0
+                    },
+                    {
+                      "color": "green",
+                      "value": 1
+                    }
+                  ]
+                }
+              }
+            },
+            "gridPos": {
+              "h": 8,
+              "w": 6,
+              "x": 18,
+              "y": 24
             }
           }
         ],

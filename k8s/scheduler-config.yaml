@@ -2,7 +2,10 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: scheduler-config
-  namespace: lead-framework
+  namespace: kube-system
+  labels:
+    app: lead-scheduler
+    component: scheduler
 data:
   scheduler-config.yaml: |
     apiVersion: kubescheduler.config.k8s.io/v1beta3
@@ -22,6 +25,14 @@ data:
       - name: LEADPlugin
         args:
           leadFramework: enabled
+          dynamicNetworkTopology: true
+          geographicAwareness: true
+          prometheusIntegration: true
+          networkMonitoringInterval: "30s"
+          networkMetricsCollectionInterval: "15s"
+          geographicDistanceThreshold: "1000km"
+          networkLatencyThreshold: "100ms"
+          bandwidthThreshold: "100Mbps"
     leaderElection:
       leaderElect: true
       resourceName: lead-scheduler

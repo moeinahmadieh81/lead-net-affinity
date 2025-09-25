@@ -50,6 +50,25 @@ spec:
           value: "default"
         - name: OUTPUT_DIRECTORY
           value: "/app/k8s-manifests"
+        # Dynamic Network Topology Configuration
+        - name: LEAD_NETWORK_MONITORING
+          value: "true"
+        - name: LEAD_DYNAMIC_DISCOVERY
+          value: "true"
+        - name: LEAD_PROMETHEUS_INTEGRATION
+          value: "true"
+        - name: LEAD_GEOGRAPHIC_AWARENESS
+          value: "true"
+        - name: NETWORK_TOPOLOGY_DISCOVERY_INTERVAL
+          value: "30s"
+        - name: NETWORK_METRICS_COLLECTION_INTERVAL
+          value: "15s"
+        - name: GEOGRAPHIC_DISTANCE_THRESHOLD
+          value: "1000km"
+        - name: NETWORK_LATENCY_THRESHOLD
+          value: "100ms"
+        - name: BANDWIDTH_THRESHOLD
+          value: "100Mbps"
         volumeMounts:
         - name: config-volume
           mountPath: /app/config

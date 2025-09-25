@@ -20,13 +20,21 @@ data:
       - "alert_rules.yml"
     
     scrape_configs:
-      # LEAD Scheduler metrics
+      # LEAD Scheduler metrics with dynamic network topology
       - job_name: 'lead-scheduler'
         static_configs:
           - targets: ['lead-scheduler.kube-system.svc.cluster.local:10259']
         metrics_path: '/metrics'
         scrape_interval: 15s
         scrape_timeout: 10s
+        relabel_configs:
+          - source_labels: [__address__]
+            target_label: instance
+            replacement: lead-scheduler
+          - target_label: component
+            replacement: scheduler
+          - target_label: network_topology
+            replacement: dynamic
     
       # Kubernetes API server metrics
       - job_name: 'kubernetes-apiservers'
@@ -139,6 +147,34 @@ data:
         static_configs:
           - targets: ['kube-state-metrics.kube-system.svc.cluster.local:8080']
     
+      # Network topology metrics for dynamic discovery
+      - job_name: 'network-topology'
+        kubernetes_sd_configs:
+          - role: node
+        relabel_configs:
+          - action: labelmap
+            regex: __meta_kubernetes_node_label_(.+)
+          - source_labels: [__meta_kubernetes_node_label_network_bandwidth_mbps]
+            target_label: node_bandwidth_mbps
+          - source_labels: [__meta_kubernetes_node_label_network_latency_ms]
+            target_label: node_latency_ms
+          - source_labels: [__meta_kubernetes_node_label_network_throughput_mbps]
+            target_label: node_throughput_mbps
+          - source_labels: [__meta_kubernetes_node_label_network_packet_loss_percent]
+            target_label: node_packet_loss_percent
+          - source_labels: [__meta_kubernetes_node_label_geo_distance_km]
+            target_label: geo_distance_km
+          - source_labels: [__meta_kubernetes_node_label_availability_zone]
+            target_label: availability_zone
+          - source_labels: [__meta_kubernetes_node_label_region]
+            target_label: region
+          - source_labels: [__meta_kubernetes_node_label_node_kubernetes_io_instance_type]
+            target_label: instance_type
+        metric_relabel_configs:
+          - source_labels: [__name__]
+            regex: 'node_network_.*'
+            action: keep
+    
     alerting:
       alertmanagers:
         - static_configs:
@@ -175,6 +211,24 @@ data:
             annotations:
               summary: "LEAD Scheduler high latency"
               description: "LEAD Scheduler 95th percentile latency is {{ $value }} seconds."
+          
+          - alert: LeadSchedulerNetworkTopologyDiscoveryFailed
+            expr: lead_scheduler_network_topology_discovery_errors_total > 0
+            for: 1m
+            labels:
+              severity: warning
+            annotations:
+              summary: "LEAD Scheduler network topology discovery failed"
+              description: "LEAD Scheduler failed to discover network topology for {{ $value }} nodes."
+          
+          - alert: LeadSchedulerHighNetworkLatency
+            expr: lead_scheduler_inter_node_latency_ms > 100
+            for: 2m
+            labels:
+              severity: warning
+            annotations:
+              summary: "LEAD Scheduler detected high inter-node latency"
+              description: "Inter-node latency is {{ $value }}ms, which may impact service placement decisions."
       
       - name: hotel-reservation
         rules:
