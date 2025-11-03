@@ -6,6 +6,7 @@ import (
 	"log"
 	"math"
 	"net/http"
+	"strings"
 	"time"
 
 	"lead-framework/internal/algorithms"
@@ -63,8 +64,8 @@ func (ls *LEADScheduler) Run(ctx context.Context) error {
 	}
 
 	// Get the service graph from LEAD framework
-	// Note: The LEAD framework will discover services dynamically
-	ls.serviceGraph = models.NewServiceGraph()
+	// The LEAD framework will discover services dynamically and populate the graph
+	ls.serviceGraph = ls.leadFramework.GetServiceGraph()
 
 	// Initialize LEAD algorithms directly
 	ls.initializeLEADAlgorithms()
@@ -161,7 +162,7 @@ func (ls *LEADScheduler) startHTTPServer() {
 
 	mux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
 		// LEAD scheduler metrics
-		w.Header().Set("Content-Type", "text/plain")
+		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte("# LEAD Scheduler Metrics\n"))
 		w.Write([]byte("lead_scheduler_status 1\n"))
 
@@ -374,13 +375,8 @@ func (ls *LEADScheduler) getNetworkTopologyForService(serviceName string) *model
 		return node.NetworkTopology
 	}
 
-	// Return default network topology
-	return &models.NetworkTopology{
-		AvailabilityZone: "default",
-		Bandwidth:        500,
-		Hops:             1,
-		GeoDistance:      0,
-	}
+	// Return nil if no network topology available
+	return nil
 }
 
 // getAvailableNodes returns list of available nodes
@@ -447,18 +443,53 @@ func (ls *LEADScheduler) calculateNodeScore(node *corev1.Node, serviceInfo *Serv
 		score += distanceScore
 	}
 
-	// Service priority scoring
-	score += float64(serviceInfo.Priority) / 10.0
-
-	// Resource availability scoring
-	if node.Status.Allocatable != nil {
-		// CPU availability
-		if cpu := node.Status.Allocatable["cpu"]; !cpu.IsZero() {
-			score += 10.0
+	// Service type-specific scoring
+	switch serviceInfo.ServiceType {
+	case "database":
+		// Database services need high memory and storage, prefer dedicated nodes
+		score += float64(serviceInfo.Priority) / 8.0 // Higher weight for database priority
+		if node.Status.Allocatable != nil {
+			// Memory is critical for databases
+			if memory := node.Status.Allocatable["memory"]; !memory.IsZero() {
+				score += 20.0 // Higher memory bonus for databases
+			}
+			// CPU is less critical for databases
+			if cpu := node.Status.Allocatable["cpu"]; !cpu.IsZero() {
+				score += 5.0 // Lower CPU bonus for databases
+			}
 		}
-		// Memory availability
-		if memory := node.Status.Allocatable["memory"]; !memory.IsZero() {
-			score += 10.0
+		// Prefer nodes with fewer existing database services (dedicated nodes)
+		existingDatabases := ls.countServicesOnNode(node, "database")
+		score += math.Max(0.0, 15.0-float64(existingDatabases)*5.0)
+
+	case "cache":
+		// Cache services need high memory and low latency
+		score += float64(serviceInfo.Priority) / 9.0 // High weight for cache priority
+		if node.Status.Allocatable != nil {
+			// Memory is critical for caches
+			if memory := node.Status.Allocatable["memory"]; !memory.IsZero() {
+				score += 15.0 // High memory bonus for caches
+			}
+			// CPU is important for cache operations
+			if cpu := node.Status.Allocatable["cpu"]; !cpu.IsZero() {
+				score += 10.0 // Good CPU bonus for caches
+			}
+		}
+		// Prefer nodes close to their dependent microservices
+		score += ls.calculateCacheAffinityScore(node, serviceInfo)
+
+	default:
+		// Standard microservice scoring
+		score += float64(serviceInfo.Priority) / 10.0
+		if node.Status.Allocatable != nil {
+			// CPU availability
+			if cpu := node.Status.Allocatable["cpu"]; !cpu.IsZero() {
+				score += 10.0
+			}
+			// Memory availability
+			if memory := node.Status.Allocatable["memory"]; !memory.IsZero() {
+				score += 10.0
+			}
 		}
 	}
 
@@ -678,6 +709,18 @@ func (ls *LEADScheduler) determineServiceType(pod *corev1.Pod, serviceName strin
 
 func (ls *LEADScheduler) determineServicePriority(serviceName string) int {
 	// Higher number = higher priority
+
+	// Database services - critical infrastructure, highest priority
+	if ls.contains(serviceName, "mongodb") {
+		return 95 // Database - very high priority
+	}
+
+	// Cache services - performance critical, high priority
+	if ls.contains(serviceName, "memcached") {
+		return 75 // Cache - high priority
+	}
+
+	// Microservices
 	switch serviceName {
 	case "frontend", "fe":
 		return 100 // Gateway - highest priority
@@ -701,7 +744,25 @@ func (ls *LEADScheduler) determineServicePriority(serviceName string) int {
 }
 
 func (ls *LEADScheduler) contains(s, substr string) bool {
-	return len(s) >= len(substr) && s[len(s)-len(substr):] == substr
+	// Check if substr exists anywhere in s (not just at the end)
+	return len(s) >= len(substr) &&
+		(s == substr ||
+			s[:len(substr)] == substr ||
+			s[len(s)-len(substr):] == substr ||
+			containsSubstring(s, substr))
+}
+
+// containsSubstring checks if substr exists anywhere in s
+func containsSubstring(s, substr string) bool {
+	if len(substr) > len(s) {
+		return false
+	}
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
 }
 
 func (ls *LEADScheduler) isAlphanumeric(s string) bool {
@@ -711,6 +772,74 @@ func (ls *LEADScheduler) isAlphanumeric(s string) bool {
 		}
 	}
 	return true
+}
+
+// countServicesOnNode counts how many services of a specific type are already on a node
+func (ls *LEADScheduler) countServicesOnNode(node *corev1.Node, serviceType string) int {
+	count := 0
+
+	// Get all pods on this node
+	pods, err := ls.client.CoreV1().Pods("").List(ls.ctx, metav1.ListOptions{
+		FieldSelector: fmt.Sprintf("spec.nodeName=%s", node.Name),
+	})
+	if err != nil {
+		log.Printf("Failed to get pods for node %s: %v", node.Name, err)
+		return 0
+	}
+
+	// Count pods of the specified service type
+	for _, pod := range pods.Items {
+		serviceInfo := ls.extractServiceInfo(&pod)
+		if serviceInfo != nil && serviceInfo.ServiceType == serviceType {
+			count++
+		}
+	}
+
+	return count
+}
+
+// calculateCacheAffinityScore calculates affinity score for cache services
+// Higher score for nodes that have the microservices that depend on this cache
+func (ls *LEADScheduler) calculateCacheAffinityScore(node *corev1.Node, serviceInfo *ServiceInfo) float64 {
+	// Get the service name (e.g., "memcached-profile")
+	serviceName := serviceInfo.ServiceName
+
+	// Extract the microservice name (e.g., "profile" from "memcached-profile")
+	var microserviceName string
+	if ls.contains(serviceName, "memcached-") {
+		microserviceName = serviceName[len("memcached-"):]
+	} else if ls.contains(serviceName, "memcached") {
+		// Handle other formats
+		parts := strings.Split(serviceName, "-")
+		for i, part := range parts {
+			if part == "memcached" && i+1 < len(parts) {
+				microserviceName = parts[i+1]
+				break
+			}
+		}
+	}
+
+	if microserviceName == "" {
+		return 0.0
+	}
+
+	// Check if the corresponding microservice is on this node
+	pods, err := ls.client.CoreV1().Pods("").List(ls.ctx, metav1.ListOptions{
+		FieldSelector: fmt.Sprintf("spec.nodeName=%s", node.Name),
+	})
+	if err != nil {
+		return 0.0
+	}
+
+	// Look for the microservice on this node
+	for _, pod := range pods.Items {
+		serviceInfo := ls.extractServiceInfo(&pod)
+		if serviceInfo != nil && serviceInfo.ServiceName == microserviceName {
+			return 20.0 // High bonus for co-locating cache with its microservice
+		}
+	}
+
+	return 0.0
 }
 
 // GetLEADFramework returns the LEAD framework instance

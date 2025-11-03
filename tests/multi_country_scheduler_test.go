@@ -30,7 +30,7 @@ func TestMultiCountrySchedulerScenario(t *testing.T) {
 		MonitoringInterval:     10 * time.Second,
 		ResourceThreshold:      80.0,
 		LatencyThreshold:       200 * time.Millisecond, // Higher threshold for geo-distributed setup
-		PrometheusURL:          "http://localhost:9090",
+		PrometheusURL:          "http://prometheus.monitoring.svc.cluster.local:9090",
 		KubernetesNamespace:    "hotel-reservation",
 		OutputDirectory:        "./hotel-k8s-manifests",
 		BandwidthWeight:        0.3, // Reduced weight for bandwidth due to geo-distribution

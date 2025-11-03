@@ -314,7 +314,7 @@ func TestLEADFrameworkWithDynamicDiscovery(t *testing.T) {
 		MonitoringInterval:     5 * time.Second,
 		ResourceThreshold:      75.0,
 		LatencyThreshold:       150 * time.Millisecond,
-		PrometheusURL:          "http://localhost:9090",
+		PrometheusURL:          "http://prometheus.monitoring.svc.cluster.local:9090",
 		KubernetesNamespace:    "hotel-reservation",
 		OutputDirectory:        "./test-k8s-manifests",
 		BandwidthWeight:        0.4,
@@ -535,8 +535,40 @@ func (msd *MockServiceDiscovery) createServiceNodeFromPods(serviceName string, p
 
 func (msd *MockServiceDiscovery) addHotelReservationDependencies() {
 	dependencies := map[string][]string{
+		// Frontend (Gateway) - depends on all business services
 		"frontend": {"search", "user", "recommendation", "reservation"},
-		"search":   {"profile", "geo", "rate"},
+
+		// Search service - depends on profile, geo, and rate for comprehensive search
+		"search": {"profile", "geo", "rate"},
+
+		// User service - depends on rate for user-specific pricing + its database
+		"user": {"rate", "mongodb-user"},
+
+		// Profile service - depends on user for profile management + its databases
+		"profile": {"user", "mongodb-profile", "memcached-profile"},
+
+		// Rate service - depends on geo for location-based pricing + its databases
+		"rate": {"geo", "mongodb-rate", "memcached-rate"},
+
+		// Geo service - depends on its database
+		"geo": {"mongodb-geo"},
+
+		// Recommendation service - depends on user, profile, reservation + its database
+		"recommendation": {"user", "profile", "reservation", "mongodb-recommendation"},
+
+		// Reservation service - depends on rate, user, geo + its databases
+		"reservation": {"rate", "user", "geo", "mongodb-reservation", "memcached-reservation"},
+
+		// Database and Cache Services (leaf nodes - no dependencies)
+		"mongodb-profile":        {},
+		"memcached-profile":      {},
+		"mongodb-rate":           {},
+		"memcached-rate":         {},
+		"mongodb-user":           {},
+		"mongodb-geo":            {},
+		"mongodb-recommendation": {},
+		"mongodb-reservation":    {},
+		"memcached-reservation":  {},
 	}
 
 	for service, deps := range dependencies {

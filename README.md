@@ -126,7 +126,7 @@ config := &lead.FrameworkConfig{
     MonitoringInterval:    15 * time.Second,
     ResourceThreshold:     75.0,
     LatencyThreshold:      150 * time.Millisecond,
-    PrometheusURL:        "http://localhost:9090",
+    PrometheusURL:        "http://prometheus.monitoring.svc.cluster.local:9090",
     KubernetesNamespace:  "my-namespace",
     OutputDirectory:      "./k8s-manifests",
     BandwidthWeight:      0.4,
@@ -280,7 +280,7 @@ See the `examples/` directory for comprehensive examples:
 
 ### Environment Variables
 
-- `PROMETHEUS_URL`: Prometheus server URL (default: http://localhost:9090)
+- `PROMETHEUS_URL`: Prometheus server URL (default: http://prometheus.monitoring.svc.cluster.local:9090)
 - `KUBERNETES_NAMESPACE`: Target Kubernetes namespace (default: default)
 - `OUTPUT_DIRECTORY`: Directory for generated manifests (default: ./k8s-manifests)
 
@@ -291,7 +291,7 @@ See the `examples/` directory for comprehensive examples:
   "monitoring_interval": "30s",
   "resource_threshold": 80.0,
   "latency_threshold": "100ms",
-  "prometheus_url": "http://localhost:9090",
+  "prometheus_url": "http://prometheus.monitoring.svc.cluster.local:9090",
   "kubernetes_namespace": "default",
   "output_directory": "./k8s-manifests",
   "bandwidth_weight": 0.4,

@@ -25,7 +25,7 @@ func TestLEADSchedulerIntegration(t *testing.T) {
 		MonitoringInterval:     5 * time.Second,
 		ResourceThreshold:      75.0,
 		LatencyThreshold:       150 * time.Millisecond,
-		PrometheusURL:          "http://localhost:9090",
+		PrometheusURL:          "http://prometheus.monitoring.svc.cluster.local:9090",
 		KubernetesNamespace:    "test-namespace",
 		OutputDirectory:        "./test-k8s-manifests",
 		BandwidthWeight:        0.4,

@@ -301,22 +301,10 @@ func (kc *KubernetesClient) GetNodes() ([]*NodeInfo, error) {
 			region = node.Labels["failure-domain.beta.kubernetes.io/region"]
 		}
 
-		// Extract instance type
-		instanceType := node.Labels["node.kubernetes.io/instance-type"]
-		if instanceType == "" {
-			instanceType = node.Labels["beta.kubernetes.io/instance-type"]
-		}
-
-		// Create network topology information
-		nodeInfo.NetworkTopology = &NodeNetworkInfo{
-			Bandwidth:        kc.estimateNodeBandwidth(instanceType),
-			Latency:          kc.estimateNodeLatency(nodeInfo.AvailabilityZone, region),
-			Throughput:       kc.estimateNodeThroughput(instanceType),
-			PacketLoss:       0.1, // Default 0.1% packet loss
-			InstanceType:     instanceType,
-			Region:           region,
-			NetworkInterface: kc.determineNetworkInterface(instanceType),
-			LastUpdated:      time.Now(),
+		// Create network topology information from dynamic data only
+		networkInfo := kc.extractNetworkInfoFromNode(nodeInfo, region)
+		if networkInfo != nil {
+			nodeInfo.NetworkTopology = networkInfo
 		}
 
 		nodeInfos = append(nodeInfos, nodeInfo)
@@ -338,14 +326,12 @@ type NodeInfo struct {
 
 // NodeNetworkInfo represents network characteristics of a Kubernetes node
 type NodeNetworkInfo struct {
-	Bandwidth        float64   `json:"bandwidth"`         // Mbps
-	Latency          float64   `json:"latency"`           // ms
-	Throughput       float64   `json:"throughput"`        // Mbps
-	PacketLoss       float64   `json:"packet_loss"`       // percentage
-	InstanceType     string    `json:"instance_type"`     // AWS/GCP instance type
-	Region           string    `json:"region"`            // Cloud region
-	NetworkInterface string    `json:"network_interface"` // Network interface type
-	LastUpdated      time.Time `json:"last_updated"`
+	Bandwidth   float64   `json:"bandwidth"`   // Mbps
+	Latency     float64   `json:"latency"`     // ms
+	Throughput  float64   `json:"throughput"`  // Mbps
+	PacketLoss  float64   `json:"packet_loss"` // percentage
+	Region      string    `json:"region"`      // Cloud region
+	LastUpdated time.Time `json:"last_updated"`
 }
 
 // Stop stops the Kubernetes client
@@ -354,61 +340,120 @@ func (kc *KubernetesClient) Stop() {
 	close(kc.eventChan)
 }
 
-// estimateNodeBandwidth estimates bandwidth dynamically from node labels
-func (kc *KubernetesClient) estimateNodeBandwidth(instanceType string) float64 {
-	// Try to extract bandwidth from instance type if it contains bandwidth info
-	// Expected format: "server-1000mbps" or "high-bandwidth-server"
-	if strings.Contains(strings.ToLower(instanceType), "high") || strings.Contains(strings.ToLower(instanceType), "1000") {
-		return 1000.0
-	}
-	if strings.Contains(strings.ToLower(instanceType), "medium") || strings.Contains(strings.ToLower(instanceType), "500") {
-		return 500.0
-	}
-	if strings.Contains(strings.ToLower(instanceType), "low") || strings.Contains(strings.ToLower(instanceType), "100") {
-		return 100.0
-	}
-	if strings.Contains(strings.ToLower(instanceType), "ultra") || strings.Contains(strings.ToLower(instanceType), "10000") {
-		return 10000.0
+// extractNetworkInfoFromNode extracts network information from node labels (dynamic data only)
+func (kc *KubernetesClient) extractNetworkInfoFromNode(node *NodeInfo, region string) *NodeNetworkInfo {
+	// Extract bandwidth from node labels
+	bandwidth := kc.extractBandwidthFromNode(node)
+	if bandwidth <= 0 {
+		log.Printf("No bandwidth data available for node %s, skipping network topology", node.Name)
+		return nil
 	}
 
-	// Default bandwidth for unknown instance types
-	return 1000.0
+	// Extract latency from node labels
+	latency := kc.extractLatencyFromNode(node)
+	if latency <= 0 {
+		log.Printf("No latency data available for node %s, skipping network topology", node.Name)
+		return nil
+	}
+
+	// Extract throughput from node labels
+	throughput := kc.extractThroughputFromNode(node)
+	if throughput <= 0 {
+		log.Printf("No throughput data available for node %s, skipping network topology", node.Name)
+		return nil
+	}
+
+	// Extract packet loss from node labels
+	packetLoss := kc.extractPacketLossFromNode(node)
+	if packetLoss < 0 {
+		log.Printf("No packet loss data available for node %s, skipping network topology", node.Name)
+		return nil
+	}
+
+	return &NodeNetworkInfo{
+		Bandwidth:   bandwidth,
+		Latency:     latency,
+		Throughput:  throughput,
+		PacketLoss:  packetLoss,
+		Region:      region,
+		LastUpdated: time.Now(),
+	}
 }
 
-// estimateNodeLatency estimates latency dynamically from zone labels
-func (kc *KubernetesClient) estimateNodeLatency(availabilityZone, region string) float64 {
-	// Try to extract latency from zone label if it contains latency info
-	// Expected format: "region-zone-latency" or "region-zone-5ms"
-	if latencyStr, exists := kc.extractLatencyFromZone(availabilityZone); exists {
+// extractBandwidthFromNode extracts bandwidth from node labels (dynamic data only)
+func (kc *KubernetesClient) extractBandwidthFromNode(node *NodeInfo) float64 {
+	// Try to extract bandwidth from node labels
+	if bandwidthStr, exists := node.Labels["network.bandwidth.mbps"]; exists {
+		if bandwidth, err := strconv.ParseFloat(bandwidthStr, 64); err == nil {
+			return bandwidth
+		}
+	}
+
+	// Try alternative label formats
+	if bandwidthStr, exists := node.Labels["bandwidth"]; exists {
+		if bandwidth, err := strconv.ParseFloat(bandwidthStr, 64); err == nil {
+			return bandwidth
+		}
+	}
+
+	return 0 // No dynamic data available
+}
+
+// extractLatencyFromNode extracts latency from node labels (dynamic data only)
+func (kc *KubernetesClient) extractLatencyFromNode(node *NodeInfo) float64 {
+	// Try to extract latency from node labels
+	if latencyStr, exists := node.Labels["network.latency.ms"]; exists {
 		if latency, err := strconv.ParseFloat(latencyStr, 64); err == nil {
 			return latency
 		}
 	}
 
-	// If no latency information in zone, use a default
-	// This will be updated by real-time monitoring
-	return 5.0 // Default latency, will be updated by network monitoring
-}
-
-// estimateNodeThroughput estimates throughput based on instance type
-func (kc *KubernetesClient) estimateNodeThroughput(instanceType string) float64 {
-	// Throughput is typically 80-90% of bandwidth due to protocol overhead
-	bandwidth := kc.estimateNodeBandwidth(instanceType)
-	return bandwidth * 0.85 // 85% of bandwidth
-}
-
-// determineNetworkInterface determines network interface type based on instance type
-func (kc *KubernetesClient) determineNetworkInterface(instanceType string) string {
-	// High performance instances typically use enhanced networking
-	highPerfInstances := []string{"c5n", "m5n", "r5n", "i3en", "p3", "p4", "g4dn", "inf1"}
-
-	for _, prefix := range highPerfInstances {
-		if len(instanceType) >= len(prefix) && instanceType[:len(prefix)] == prefix {
-			return "enhanced" // Enhanced networking (SR-IOV, EFA, etc.)
+	// Try alternative label formats
+	if latencyStr, exists := node.Labels["latency"]; exists {
+		if latency, err := strconv.ParseFloat(latencyStr, 64); err == nil {
+			return latency
 		}
 	}
 
-	return "standard" // Standard networking
+	return 0 // No dynamic data available
+}
+
+// extractThroughputFromNode extracts throughput from node labels (dynamic data only)
+func (kc *KubernetesClient) extractThroughputFromNode(node *NodeInfo) float64 {
+	// Try to extract throughput from node labels
+	if throughputStr, exists := node.Labels["network.throughput.mbps"]; exists {
+		if throughput, err := strconv.ParseFloat(throughputStr, 64); err == nil {
+			return throughput
+		}
+	}
+
+	// Try alternative label formats
+	if throughputStr, exists := node.Labels["throughput"]; exists {
+		if throughput, err := strconv.ParseFloat(throughputStr, 64); err == nil {
+			return throughput
+		}
+	}
+
+	return 0 // No dynamic data available
+}
+
+// extractPacketLossFromNode extracts packet loss from node labels (dynamic data only)
+func (kc *KubernetesClient) extractPacketLossFromNode(node *NodeInfo) float64 {
+	// Try to extract packet loss from node labels
+	if packetLossStr, exists := node.Labels["network.packetloss.percent"]; exists {
+		if packetLoss, err := strconv.ParseFloat(packetLossStr, 64); err == nil {
+			return packetLoss
+		}
+	}
+
+	// Try alternative label formats
+	if packetLossStr, exists := node.Labels["packetloss"]; exists {
+		if packetLoss, err := strconv.ParseFloat(packetLossStr, 64); err == nil {
+			return packetLoss
+		}
+	}
+
+	return -1 // No dynamic data available
 }
 
 // Helper functions

@@ -1,8 +1,8 @@
-.PHONY: build test run clean
+.PHONY: build test run clean docker-build docker-push deploy-dynamic cleanup-dynamic
 
-# Build the LEAD framework
+# Build the LEAD framework with dynamic network topology
 build:
-	go build -o lead-framework main.go
+	go build -o lead-scheduler ./cmd/scheduler
 
 # Run tests
 test:
@@ -12,19 +12,34 @@ test:
 benchmark:
 	go test -bench=. ./tests/...
 
-# Run the example
+# Run the LEAD scheduler
 run:
-	go run main.go
+	go run ./cmd/scheduler
 
-# Run the hotel reservation example
-run-example:
-	go run examples/hotel_reservation.go
+# Run the LEAD scheduler with dynamic network monitoring
+run-dynamic:
+	go run ./cmd/scheduler --enable-dynamic-network-monitoring --enable-geographic-awareness
 
 # Clean build artifacts
 clean:
-	rm -f lead-framework
+	rm -f lead-scheduler
 	rm -rf k8s-manifests
 	rm -rf hotel-k8s-manifests
+
+# Docker operations
+docker-build:
+	docker build -t lead-scheduler:latest .
+
+docker-push:
+	docker push lead-scheduler:latest
+
+# Deploy dynamic network topology
+deploy-dynamic:
+	./scripts/deploy-dynamic-network-topology.sh
+
+# Cleanup dynamic network topology
+cleanup-dynamic:
+	./scripts/cleanup-dynamic-network-topology.sh
 
 # Format code
 fmt:
@@ -41,13 +56,17 @@ deps:
 # Show help
 help:
 	@echo "Available targets:"
-	@echo "  build       - Build the LEAD framework binary"
-	@echo "  test        - Run all tests"
-	@echo "  benchmark   - Run benchmarks"
-	@echo "  run         - Run the basic example"
-	@echo "  run-example - Run the hotel reservation example"
-	@echo "  clean       - Clean build artifacts"
-	@echo "  fmt         - Format Go code"
-	@echo "  lint        - Run linter (requires golangci-lint)"
-	@echo "  deps        - Install dependencies"
-	@echo "  help        - Show this help message"
+	@echo "  build         - Build the LEAD scheduler binary"
+	@echo "  test          - Run all tests"
+	@echo "  benchmark     - Run benchmarks"
+	@echo "  run           - Run the LEAD scheduler"
+	@echo "  run-dynamic   - Run with dynamic network monitoring"
+	@echo "  clean         - Clean build artifacts"
+	@echo "  fmt           - Format Go code"
+	@echo "  lint          - Run linter (requires golangci-lint)"
+	@echo "  deps          - Install dependencies"
+	@echo "  docker-build  - Build Docker image"
+	@echo "  docker-push   - Push Docker image"
+	@echo "  deploy-dynamic - Deploy with dynamic network topology"
+	@echo "  cleanup-dynamic - Cleanup dynamic network topology deployment"
+	@echo "  help          - Show this help message"

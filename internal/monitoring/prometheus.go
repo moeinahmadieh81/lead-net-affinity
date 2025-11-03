@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"math/rand"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -64,29 +63,25 @@ func DefaultPrometheusQueries() *PrometheusQueries {
 
 // NewPrometheusMonitor creates a new Prometheus monitor with real querying capability
 func NewPrometheusMonitor(prometheusURL string, interval time.Duration) (*PrometheusMonitor, error) {
-	ctx, cancel := context.WithCancel(context.Background())
-
 	// Create HTTP client with timeout
 	httpClient := &http.Client{
 		Timeout: 30 * time.Second,
 	}
 
-	// Test connection to Prometheus
-	simulated := false
+	// Test connection to Prometheus - fail if not available
 	if err := testPrometheusConnection(prometheusURL, httpClient); err != nil {
-		log.Printf("Warning: Cannot connect to Prometheus at %s: %v", prometheusURL, err)
-		log.Println("Falling back to simulated mode")
-		simulated = true
-	} else {
-		log.Printf("Successfully connected to Prometheus at %s", prometheusURL)
+		return nil, fmt.Errorf("cannot connect to Prometheus at %s: %v", prometheusURL, err)
 	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	log.Printf("Successfully connected to Prometheus at %s", prometheusURL)
 
 	return &PrometheusMonitor{
 		queries:       DefaultPrometheusQueries(),
 		interval:      interval,
 		ctx:           ctx,
 		cancel:        cancel,
-		simulated:     simulated,
+		simulated:     false, // No simulation fallback
 		prometheusURL: prometheusURL,
 		httpClient:    httpClient,
 	}, nil
@@ -161,165 +156,53 @@ func (pm *PrometheusMonitor) collectServiceMetrics(serviceID string) (*algorithm
 		IsHealthy:   true,
 	}
 
-	if pm.simulated {
-		// Fallback to simulated metrics if Prometheus is not available
-		metrics.CPUUsage = pm.simulateCPUUsage(serviceID)
-		metrics.MemoryUsage = pm.simulateMemoryUsage(serviceID)
-		metrics.RequestRate = pm.simulateRequestRate(serviceID)
-		metrics.ErrorRate = pm.simulateErrorRate(serviceID)
-		metrics.ResponseTime = pm.simulateResponseTime(serviceID)
-		metrics.NetworkLatency = pm.simulateNetworkLatency(serviceID)
-		metrics.IsHealthy = pm.determineHealthStatus(metrics)
-	} else {
-		// Use real Prometheus queries as per LEAD paper
-		var err error
+	// Use real Prometheus queries only - no fallbacks
+	var err error
 
-		// Collect CPU usage
-		if metrics.CPUUsage, err = pm.queryPrometheusMetric(pm.queries.CPUUsage, serviceID); err != nil {
-			log.Printf("Failed to get CPU usage for %s: %v", serviceID, err)
-			metrics.CPUUsage = pm.simulateCPUUsage(serviceID) // Fallback
-		}
-
-		// Collect memory usage
-		if metrics.MemoryUsage, err = pm.queryPrometheusMetric(pm.queries.MemoryUsage, serviceID); err != nil {
-			log.Printf("Failed to get memory usage for %s: %v", serviceID, err)
-			metrics.MemoryUsage = pm.simulateMemoryUsage(serviceID) // Fallback
-		}
-
-		// Collect request rate (RPS) - This is the key metric for LEAD paper
-		if metrics.RequestRate, err = pm.queryPrometheusMetric(pm.queries.RequestRate, serviceID); err != nil {
-			log.Printf("Failed to get request rate for %s: %v", serviceID, err)
-			metrics.RequestRate = pm.simulateRequestRate(serviceID) // Fallback
-		}
-
-		// Collect error rate
-		if metrics.ErrorRate, err = pm.queryPrometheusMetric(pm.queries.ErrorRate, serviceID); err != nil {
-			log.Printf("Failed to get error rate for %s: %v", serviceID, err)
-			metrics.ErrorRate = pm.simulateErrorRate(serviceID) // Fallback
-		}
-
-		// Collect response time
-		if responseTimeMs, err := pm.queryPrometheusMetric(pm.queries.ResponseTime, serviceID); err != nil {
-			log.Printf("Failed to get response time for %s: %v", serviceID, err)
-			metrics.ResponseTime = pm.simulateResponseTime(serviceID) // Fallback
-		} else {
-			metrics.ResponseTime = time.Duration(responseTimeMs) * time.Millisecond
-		}
-
-		// Collect network latency
-		if latencyMs, err := pm.queryPrometheusMetric(pm.queries.Latency, serviceID); err != nil {
-			log.Printf("Failed to get network latency for %s: %v", serviceID, err)
-			metrics.NetworkLatency = pm.simulateNetworkLatency(serviceID) // Fallback
-		} else {
-			metrics.NetworkLatency = time.Duration(latencyMs) * time.Millisecond
-		}
-
-		// Determine health status
-		metrics.IsHealthy = pm.determineHealthStatus(metrics)
+	// Collect CPU usage
+	if metrics.CPUUsage, err = pm.queryPrometheusMetric(pm.queries.CPUUsage, serviceID); err != nil {
+		log.Printf("Failed to get CPU usage for %s: %v", serviceID, err)
+		return nil, fmt.Errorf("failed to collect CPU usage: %v", err)
 	}
+
+	// Collect memory usage
+	if metrics.MemoryUsage, err = pm.queryPrometheusMetric(pm.queries.MemoryUsage, serviceID); err != nil {
+		log.Printf("Failed to get memory usage for %s: %v", serviceID, err)
+		return nil, fmt.Errorf("failed to collect memory usage: %v", err)
+	}
+
+	// Collect request rate (RPS) - This is the key metric for LEAD paper
+	if metrics.RequestRate, err = pm.queryPrometheusMetric(pm.queries.RequestRate, serviceID); err != nil {
+		log.Printf("Failed to get request rate for %s: %v", serviceID, err)
+		return nil, fmt.Errorf("failed to collect request rate: %v", err)
+	}
+
+	// Collect error rate
+	if metrics.ErrorRate, err = pm.queryPrometheusMetric(pm.queries.ErrorRate, serviceID); err != nil {
+		log.Printf("Failed to get error rate for %s: %v", serviceID, err)
+		return nil, fmt.Errorf("failed to collect error rate: %v", err)
+	}
+
+	// Collect response time
+	responseTimeMs, err := pm.queryPrometheusMetric(pm.queries.ResponseTime, serviceID)
+	if err != nil {
+		log.Printf("Failed to get response time for %s: %v", serviceID, err)
+		return nil, fmt.Errorf("failed to collect response time: %v", err)
+	}
+	metrics.ResponseTime = time.Duration(responseTimeMs) * time.Millisecond
+
+	// Collect network latency
+	latencyMs, err := pm.queryPrometheusMetric(pm.queries.Latency, serviceID)
+	if err != nil {
+		log.Printf("Failed to get network latency for %s: %v", serviceID, err)
+		return nil, fmt.Errorf("failed to collect network latency: %v", err)
+	}
+	metrics.NetworkLatency = time.Duration(latencyMs) * time.Millisecond
+
+	// Determine health status
+	metrics.IsHealthy = pm.determineHealthStatus(metrics)
 
 	return metrics, nil
-}
-
-// Simulate various metrics based on service ID and characteristics
-func (pm *PrometheusMonitor) simulateCPUUsage(serviceID string) float64 {
-	// Simulate CPU usage between 20-80%
-	baseUsage := 30.0 + rand.Float64()*50.0
-
-	// Add some variation based on service type
-	switch serviceID {
-	case "fe":
-		baseUsage += 10.0 // Frontend typically has higher CPU usage
-	case "src":
-		baseUsage += 15.0 // Search service is CPU intensive
-	case "rsv":
-		baseUsage += 5.0 // Reservation service moderate usage
-	default:
-		baseUsage += rand.Float64() * 10.0
-	}
-
-	return baseUsage
-}
-
-func (pm *PrometheusMonitor) simulateMemoryUsage(serviceID string) float64 {
-	// Simulate memory usage between 30-70%
-	baseUsage := 40.0 + rand.Float64()*30.0
-
-	switch serviceID {
-	case "rcm":
-		baseUsage += 15.0 // Recommendation service uses more memory
-	case "usr":
-		baseUsage += 10.0 // User service moderate memory usage
-	default:
-		baseUsage += rand.Float64() * 10.0
-	}
-
-	return baseUsage
-}
-
-func (pm *PrometheusMonitor) simulateRequestRate(serviceID string) float64 {
-	// Simulate RPS based on service type
-	switch serviceID {
-	case "fe":
-		return 800.0 + rand.Float64()*400.0
-	case "src":
-		return 600.0 + rand.Float64()*300.0
-	case "usr":
-		return 400.0 + rand.Float64()*200.0
-	case "rsv":
-		return 500.0 + rand.Float64()*250.0
-	case "rcm":
-		return 200.0 + rand.Float64()*100.0
-	default:
-		return 100.0 + rand.Float64()*200.0
-	}
-}
-
-func (pm *PrometheusMonitor) simulateErrorRate(serviceID string) float64 {
-	// Simulate error rate between 0.1-3%
-	return 0.1 + rand.Float64()*2.9
-}
-
-func (pm *PrometheusMonitor) simulateResponseTime(serviceID string) time.Duration {
-	// Simulate response time based on service complexity
-	var baseTime time.Duration
-
-	switch serviceID {
-	case "fe":
-		baseTime = 50 * time.Millisecond
-	case "src":
-		baseTime = 100 * time.Millisecond // Search takes longer
-	case "rsv":
-		baseTime = 80 * time.Millisecond
-	case "rcm":
-		baseTime = 120 * time.Millisecond // Recommendation takes longer
-	default:
-		baseTime = 60 * time.Millisecond
-	}
-
-	// Add random variation
-	variation := time.Duration(rand.Float64()*50) * time.Millisecond
-	return baseTime + variation
-}
-
-func (pm *PrometheusMonitor) simulateNetworkLatency(serviceID string) time.Duration {
-	// Simulate network latency based on service location
-	var baseLatency time.Duration
-
-	switch serviceID {
-	case "fe":
-		baseLatency = 10 * time.Millisecond // Gateway has lowest latency
-	case "src", "usr":
-		baseLatency = 20 * time.Millisecond // Services in same AZ
-	case "rcm", "rte":
-		baseLatency = 40 * time.Millisecond // Services in different AZ
-	default:
-		baseLatency = 25 * time.Millisecond
-	}
-
-	// Add random variation
-	variation := time.Duration(rand.Float64()*20) * time.Millisecond
-	return baseLatency + variation
 }
 
 // determineHealthStatus determines if a service is healthy based on its metrics

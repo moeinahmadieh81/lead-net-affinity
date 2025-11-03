@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"log"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
 	"lead-framework/internal/kubernetes"
 	"lead-framework/internal/models"
+	"lead-framework/internal/monitoring"
 )
 
 // ServiceDiscovery provides dynamic service discovery for LEAD framework
@@ -155,8 +155,6 @@ func (sd *ServiceDiscovery) createServiceNodeFromPods(serviceName string, pods [
 		}
 	}
 
-	// RPS will be gathered by monitoring system during runtime (as per LEAD paper)
-	// Set initial RPS to 0 - it will be updated by monitoring system
 	rps := 0.0
 
 	// Create network topology based on node distribution
@@ -182,80 +180,202 @@ func (sd *ServiceDiscovery) createServiceNodeFromPods(serviceName string, pods [
 	return serviceNode
 }
 
-// createNetworkTopology creates network topology based on pod distribution
+// createNetworkTopology creates network topology using Prometheus queries only
 func (sd *ServiceDiscovery) createNetworkTopology(pods []*models.PodInfo) *models.NetworkTopology {
 	if len(pods) == 0 {
 		return nil
 	}
 
-	// Get node information
-	nodes, err := sd.k8sClient.GetNodes()
+	// Get network topology from Prometheus for the service
+	serviceName := pods[0].ServiceName
+	networkTopology, err := sd.getServiceNetworkTopologyFromPrometheus(serviceName)
 	if err != nil {
-		log.Printf("Failed to get node information: %v", err)
-		return &models.NetworkTopology{
-			AvailabilityZone: "unknown",
-			Bandwidth:        500,
-			Hops:             1,
-			GeoDistance:      100,
-			Throughput:       425, // 85% of bandwidth
-			Latency:          5.0, // Default latency
-			PacketLoss:       0.1, // Default packet loss
-		}
+		log.Printf("Failed to get network topology from Prometheus for service %s: %v", serviceName, err)
+		return nil
 	}
 
-	// Find the most common availability zone for this service
-	zoneCount := make(map[string]int)
-	for _, pod := range pods {
-		for _, node := range nodes {
-			if node.Name == pod.NodeName && node.AvailabilityZone != "" {
-				zoneCount[node.AvailabilityZone]++
-			}
-		}
+	return networkTopology
+}
+
+// getServiceNetworkTopologyFromPrometheus gets network topology for a service from Prometheus only
+func (sd *ServiceDiscovery) getServiceNetworkTopologyFromPrometheus(serviceName string) (*models.NetworkTopology, error) {
+	// Create a temporary Prometheus client for this operation
+	// In a real implementation, this would be injected as a dependency
+	prometheusClient := monitoring.NewRealPrometheusClient("http://prometheus.monitoring.svc.cluster.local:9090")
+
+	// Get service latency - must have real data
+	latency, err := sd.getServiceLatencyFromPrometheus(prometheusClient, serviceName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get service latency: %v", err)
 	}
 
-	// Determine primary availability zone
-	var primaryZone string
-	maxCount := 0
-	for zone, count := range zoneCount {
-		if count > maxCount {
-			maxCount = count
-			primaryZone = zone
-		}
+	// Get service bandwidth - must have real data
+	bandwidth, err := sd.getServiceBandwidthFromPrometheus(prometheusClient, serviceName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get service bandwidth: %v", err)
 	}
 
-	if primaryZone == "" {
-		primaryZone = "unknown"
+	// Get service throughput - must have real data
+	throughput, err := sd.getServiceThroughputFromPrometheus(prometheusClient, serviceName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get service throughput: %v", err)
 	}
 
-	// Estimate bandwidth based on node type (simplified)
-	bandwidth := sd.estimateBandwidth(pods[0])
+	// Get service packet loss - must have real data
+	packetLoss, err := sd.getServicePacketLossFromPrometheus(prometheusClient, serviceName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get service packet loss: %v", err)
+	}
 
-	// Estimate hops based on service type
-	hops := sd.estimateHops(pods[0].ServiceType)
+	// Get availability zone - must have real data
+	availabilityZone, err := sd.getServiceAvailabilityZoneFromPrometheus(prometheusClient, serviceName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get availability zone: %v", err)
+	}
 
-	// Estimate geo distance based on zone
-	geoDistance := sd.estimateGeoDistance(primaryZone)
+	// Calculate hops (simplified)
+	hops := sd.calculateServiceHops(serviceName)
+
+	// Calculate geo distance (simplified)
+	geoDistance := sd.calculateServiceGeoDistance(availabilityZone)
 
 	return &models.NetworkTopology{
-		AvailabilityZone: primaryZone,
+		AvailabilityZone: availabilityZone,
 		Bandwidth:        bandwidth,
 		Hops:             hops,
 		GeoDistance:      geoDistance,
-		Throughput:       bandwidth * 0.85, // Estimate throughput as 85% of bandwidth
-		Latency:          1.0,              // Default latency, will be updated by monitoring
-		PacketLoss:       0.1,              // Default packet loss, will be updated by monitoring
-	}
+		Throughput:       throughput,
+		Latency:          latency,
+		PacketLoss:       packetLoss,
+	}, nil
 }
 
-// estimateBandwidth estimates network bandwidth dynamically from node labels
-func (sd *ServiceDiscovery) estimateBandwidth(pod *models.PodInfo) float64 {
-	// Get node information to extract bandwidth from labels
-	nodes, err := sd.k8sClient.GetNodes()
+// getServiceLatencyFromPrometheus gets latency for a service from Prometheus
+func (sd *ServiceDiscovery) getServiceLatencyFromPrometheus(client monitoring.PrometheusClient, serviceName string) (float64, error) {
+	query := fmt.Sprintf(`histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{service="%s"}[5m])) * 1000`, serviceName)
+	results, err := client.Query(query)
 	if err != nil {
-		log.Printf("Failed to get nodes for bandwidth estimation: %v", err)
-		return 1000.0 // Default fallback
+		return 0, err
 	}
 
+	if len(results) == 0 {
+		return 0, fmt.Errorf("no latency data for service %s", serviceName)
+	}
+
+	value, err := sd.parseMetricValue(results[0].Value[1])
+	if err != nil {
+		return 0, err
+	}
+
+	return value, nil
+}
+
+// getServiceBandwidthFromPrometheus gets bandwidth for a service from Prometheus
+func (sd *ServiceDiscovery) getServiceBandwidthFromPrometheus(client monitoring.PrometheusClient, serviceName string) (float64, error) {
+	query := fmt.Sprintf(`rate(http_request_bytes_total{service="%s"}[5m])`, serviceName)
+	results, err := client.Query(query)
+	if err != nil {
+		return 0, err
+	}
+
+	if len(results) == 0 {
+		return 0, fmt.Errorf("no bandwidth data for service %s", serviceName)
+	}
+
+	value, err := sd.parseMetricValue(results[0].Value[1])
+	if err != nil {
+		return 0, err
+	}
+
+	// Convert bytes to Mbps
+	return value / (1024 * 1024), nil
+}
+
+// getServiceThroughputFromPrometheus gets throughput for a service from Prometheus
+func (sd *ServiceDiscovery) getServiceThroughputFromPrometheus(client monitoring.PrometheusClient, serviceName string) (float64, error) {
+	query := fmt.Sprintf(`rate(http_requests_total{service="%s"}[5m])`, serviceName)
+	results, err := client.Query(query)
+	if err != nil {
+		return 0, err
+	}
+
+	if len(results) == 0 {
+		return 0, fmt.Errorf("no throughput data for service %s", serviceName)
+	}
+
+	value, err := sd.parseMetricValue(results[0].Value[1])
+	if err != nil {
+		return 0, err
+	}
+
+	// Convert requests per second to Mbps (simplified)
+	return value * 0.001, nil
+}
+
+// getServicePacketLossFromPrometheus gets packet loss for a service from Prometheus
+func (sd *ServiceDiscovery) getServicePacketLossFromPrometheus(client monitoring.PrometheusClient, serviceName string) (float64, error) {
+	query := fmt.Sprintf(`rate(http_requests_total{service="%s",status=~"5.."}[5m]) / rate(http_requests_total{service="%s"}[5m]) * 100`, serviceName, serviceName)
+	results, err := client.Query(query)
+	if err != nil {
+		return 0, err
+	}
+
+	if len(results) == 0 {
+		return 0, fmt.Errorf("no packet loss data for service %s", serviceName)
+	}
+
+	return sd.parseMetricValue(results[0].Value[1])
+}
+
+// getServiceAvailabilityZoneFromPrometheus gets availability zone for a service from Prometheus
+func (sd *ServiceDiscovery) getServiceAvailabilityZoneFromPrometheus(client monitoring.PrometheusClient, serviceName string) (string, error) {
+	// Get the node where the service is running
+	query := fmt.Sprintf(`kube_pod_info{pod=~"%s-.*"}`, serviceName)
+	results, err := client.Query(query)
+	if err != nil {
+		return "unknown", err
+	}
+
+	if len(results) == 0 {
+		return "unknown", fmt.Errorf("no availability zone data for service %s", serviceName)
+	}
+
+	// Extract availability zone from node labels
+	if zone, exists := results[0].Metric["zone"]; exists {
+		return zone, nil
+	}
+
+	return "unknown", nil
+}
+
+// calculateServiceHops calculates network hops for a service from Prometheus only
+func (sd *ServiceDiscovery) calculateServiceHops(serviceName string) int {
+	// In a real implementation, this would query Prometheus for actual hop data
+	// For now, return 0 to indicate no hop data available
+	// This should be replaced with actual Prometheus queries when hop metrics are available
+	return 0 // No hop data available
+}
+
+// calculateServiceGeoDistance calculates geographic distance for a service
+func (sd *ServiceDiscovery) calculateServiceGeoDistance(availabilityZone string) float64 {
+	// In production, we don't know which region is the "primary" region
+	// Geographic distance calculation requires a reference point which we don't have
+	// Return 0 to indicate no distance information is available
+	return 0.0 // No distance information available without knowing the reference point
+}
+
+// parseMetricValue parses a metric value from Prometheus response
+func (sd *ServiceDiscovery) parseMetricValue(value interface{}) (float64, error) {
+	valueStr, ok := value.(string)
+	if !ok {
+		return 0, fmt.Errorf("invalid value type")
+	}
+
+	return strconv.ParseFloat(valueStr, 64)
+}
+
+// extractBandwidthFromNode extracts bandwidth from node labels (dynamic data only)
+func (sd *ServiceDiscovery) extractBandwidthFromNode(pod *models.PodInfo, nodes []*kubernetes.NodeInfo) float64 {
 	// Find the node where this pod is running
 	for _, node := range nodes {
 		if node.Name == pod.NodeName {
@@ -272,58 +392,153 @@ func (sd *ServiceDiscovery) estimateBandwidth(pod *models.PodInfo) float64 {
 					return bandwidth
 				}
 			}
+		}
+	}
 
-			// Try to extract from instance type if available
-			if instanceType, exists := node.Labels["node.kubernetes.io/instance-type"]; exists {
-				return sd.estimateBandwidthFromInstanceType(instanceType)
+	return 0 // No dynamic data available
+}
+
+// extractHopsFromNode extracts network hops from node labels (dynamic data only)
+func (sd *ServiceDiscovery) extractHopsFromNode(pod *models.PodInfo, nodes []*kubernetes.NodeInfo) int {
+	// Find the node where this pod is running
+	for _, node := range nodes {
+		if node.Name == pod.NodeName {
+			// Try to extract hops from node labels
+			if hopsStr, exists := node.Labels["network.hops"]; exists {
+				if hops, err := strconv.Atoi(hopsStr); err == nil {
+					return hops
+				}
 			}
 
-			// Default based on service type if no labels available
-			return sd.getDefaultBandwidthForServiceType(pod.ServiceType)
+			// Try alternative label formats
+			if hopsStr, exists := node.Labels["hops"]; exists {
+				if hops, err := strconv.Atoi(hopsStr); err == nil {
+					return hops
+				}
+			}
 		}
 	}
 
-	return 1000.0 // Default fallback
+	return 0 // No dynamic data available
 }
 
-// estimateHops estimates network hops dynamically from service characteristics
-func (sd *ServiceDiscovery) estimateHops(serviceType string) int {
-	// Dynamic hop estimation based on service type characteristics
-	// Database services typically have more hops due to additional network layers
-	switch serviceType {
-	case "mongodb", "database", "postgresql", "mysql":
-		return 2 // Database services typically have 2 hops
-	case "memcached", "redis", "cache":
-		return 2 // Cache services typically have 2 hops
-	case "frontend", "gateway":
-		return 1 // Frontend services typically have 1 hop
-	default:
-		return 1 // Default for microservices
-	}
+// extractGeoDistanceFromZone extracts geographic distance from zone labels (dynamic data only)
+func (sd *ServiceDiscovery) extractGeoDistanceFromZone(zone string) float64 {
+	// In production, we don't know which region is the "primary" region
+	// Geographic distance calculation requires a reference point which we don't have
+	return -1 // No dynamic data available
 }
 
-// estimateGeoDistance estimates geographic distance dynamically from zone labels
-func (sd *ServiceDiscovery) estimateGeoDistance(zone string) float64 {
-	// Try to extract distance from zone label if it contains distance information
-	// Expected format: "region-zone-distance" or "region-zone" with distance in label
-	if distanceStr, exists := sd.extractDistanceFromZone(zone); exists {
-		if distance, err := strconv.ParseFloat(distanceStr, 64); err == nil {
-			return distance
+// extractThroughputFromNode extracts throughput from node labels (dynamic data only)
+func (sd *ServiceDiscovery) extractThroughputFromNode(pod *models.PodInfo, nodes []*kubernetes.NodeInfo) float64 {
+	// Find the node where this pod is running
+	for _, node := range nodes {
+		if node.Name == pod.NodeName {
+			// Try to extract throughput from node labels
+			if throughputStr, exists := node.Labels["network.throughput.mbps"]; exists {
+				if throughput, err := strconv.ParseFloat(throughputStr, 64); err == nil {
+					return throughput
+				}
+			}
+
+			// Try alternative label formats
+			if throughputStr, exists := node.Labels["throughput"]; exists {
+				if throughput, err := strconv.ParseFloat(throughputStr, 64); err == nil {
+					return throughput
+				}
+			}
 		}
 	}
 
-	// If no distance information in zone, use a default based on zone characteristics
-	// This will be updated by real-time monitoring
-	return 100.0 // Default distance, will be updated by network monitoring
+	return 0 // No dynamic data available
 }
 
-// addHotelReservationDependencies adds the known dependencies for HotelReservation benchmark
+// extractLatencyFromNode extracts latency from node labels (dynamic data only)
+func (sd *ServiceDiscovery) extractLatencyFromNode(pod *models.PodInfo, nodes []*kubernetes.NodeInfo) float64 {
+	// Find the node where this pod is running
+	for _, node := range nodes {
+		if node.Name == pod.NodeName {
+			// Try to extract latency from node labels
+			if latencyStr, exists := node.Labels["network.latency.ms"]; exists {
+				if latency, err := strconv.ParseFloat(latencyStr, 64); err == nil {
+					return latency
+				}
+			}
+
+			// Try alternative label formats
+			if latencyStr, exists := node.Labels["latency"]; exists {
+				if latency, err := strconv.ParseFloat(latencyStr, 64); err == nil {
+					return latency
+				}
+			}
+		}
+	}
+
+	return 0 // No dynamic data available
+}
+
+// extractPacketLossFromNode extracts packet loss from node labels (dynamic data only)
+func (sd *ServiceDiscovery) extractPacketLossFromNode(pod *models.PodInfo, nodes []*kubernetes.NodeInfo) float64 {
+	// Find the node where this pod is running
+	for _, node := range nodes {
+		if node.Name == pod.NodeName {
+			// Try to extract packet loss from node labels
+			if packetLossStr, exists := node.Labels["network.packetloss.percent"]; exists {
+				if packetLoss, err := strconv.ParseFloat(packetLossStr, 64); err == nil {
+					return packetLoss
+				}
+			}
+
+			// Try alternative label formats
+			if packetLossStr, exists := node.Labels["packetloss"]; exists {
+				if packetLoss, err := strconv.ParseFloat(packetLossStr, 64); err == nil {
+					return packetLoss
+				}
+			}
+		}
+	}
+
+	return -1 // No dynamic data available
+}
+
+// addHotelReservationDependencies adds the complete dependency graph for HotelReservation benchmark
 func (sd *ServiceDiscovery) addHotelReservationDependencies() {
-	// Frontend dependencies (based on the dependency graph)
+	// Complete service dependency graph including microservices, databases, and caches
 	dependencies := map[string][]string{
+		// Frontend (Gateway) - depends on all business services
 		"frontend": {"search", "user", "recommendation", "reservation"},
-		"search":   {"profile", "geo", "rate"},
-		"user":     {"rate"},
+
+		// Search service - depends on profile, geo, and rate for comprehensive search
+		"search": {"profile", "geo", "rate"},
+
+		// User service - depends on rate for user-specific pricing + its database
+		"user": {"rate", "mongodb-user"},
+
+		// Profile service - depends on user for profile management + its databases
+		"profile": {"user", "mongodb-profile", "memcached-profile"},
+
+		// Rate service - depends on geo for location-based pricing + its databases
+		"rate": {"geo", "mongodb-rate", "memcached-rate"},
+
+		// Geo service - depends on its database
+		"geo": {"mongodb-geo"},
+
+		// Recommendation service - depends on user, profile, reservation + its database
+		"recommendation": {"user", "profile", "reservation", "mongodb-recommendation"},
+
+		// Reservation service - depends on rate, user, geo + its databases
+		"reservation": {"rate", "user", "geo", "mongodb-reservation", "memcached-reservation"},
+
+		// Database and Cache Services (leaf nodes - no dependencies)
+		"mongodb-profile":        {},
+		"memcached-profile":      {},
+		"mongodb-rate":           {},
+		"memcached-rate":         {},
+		"mongodb-user":           {},
+		"mongodb-geo":            {},
+		"mongodb-recommendation": {},
+		"mongodb-reservation":    {},
+		"memcached-reservation":  {},
 	}
 
 	for service, deps := range dependencies {
@@ -336,71 +551,6 @@ func (sd *ServiceDiscovery) addHotelReservationDependencies() {
 			}
 		}
 	}
-}
-
-// estimateBandwidthFromInstanceType estimates bandwidth from instance type label
-func (sd *ServiceDiscovery) estimateBandwidthFromInstanceType(instanceType string) float64 {
-	// Try to extract bandwidth from instance type if it contains bandwidth info
-	// Expected format: "server-1000mbps" or "high-bandwidth-server"
-	if strings.Contains(strings.ToLower(instanceType), "high") || strings.Contains(strings.ToLower(instanceType), "1000") {
-		return 1000.0
-	}
-	if strings.Contains(strings.ToLower(instanceType), "medium") || strings.Contains(strings.ToLower(instanceType), "500") {
-		return 500.0
-	}
-	if strings.Contains(strings.ToLower(instanceType), "low") || strings.Contains(strings.ToLower(instanceType), "100") {
-		return 100.0
-	}
-
-	// Default bandwidth for unknown instance types
-	return 800.0
-}
-
-// getDefaultBandwidthForServiceType returns default bandwidth based on service type
-func (sd *ServiceDiscovery) getDefaultBandwidthForServiceType(serviceType string) float64 {
-	// Default bandwidth based on service type characteristics
-	switch serviceType {
-	case "frontend", "gateway":
-		return 1000.0 // Frontend services need higher bandwidth
-	case "microservice":
-		return 800.0 // Standard microservice bandwidth
-	case "mongodb", "database":
-		return 600.0 // Database services
-	case "memcached", "cache":
-		return 500.0 // Cache services
-	default:
-		return 800.0 // Default bandwidth
-	}
-}
-
-// extractDistanceFromZone tries to extract distance information from zone label
-func (sd *ServiceDiscovery) extractDistanceFromZone(zone string) (string, bool) {
-	// Try to extract distance from zone label
-	// Expected formats: "region-zone-distance", "region-zone-100km", etc.
-	parts := strings.Split(zone, "-")
-	if len(parts) >= 3 {
-		// Check if last part is a number (distance)
-		lastPart := parts[len(parts)-1]
-		if _, err := strconv.ParseFloat(lastPart, 64); err == nil {
-			return lastPart, true
-		}
-		// Check if last part contains "km" or distance indicator
-		if strings.Contains(strings.ToLower(lastPart), "km") {
-			distanceStr := strings.TrimSuffix(strings.ToLower(lastPart), "km")
-			if _, err := strconv.ParseFloat(distanceStr, 64); err == nil {
-				return distanceStr, true
-			}
-		}
-	}
-
-	// Try to extract from zone label if it contains distance info
-	if strings.Contains(strings.ToLower(zone), "distance") {
-		// Look for distance pattern in the zone string
-		// This is a simple implementation - could be enhanced with regex
-		return "", false
-	}
-
-	return "", false
 }
 
 // watchPodEvents watches for pod events and updates the service graph

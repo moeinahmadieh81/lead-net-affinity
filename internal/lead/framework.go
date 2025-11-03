@@ -56,7 +56,7 @@ func DefaultFrameworkConfig() *FrameworkConfig {
 		MonitoringInterval:     30 * time.Second,
 		ResourceThreshold:      80.0,
 		LatencyThreshold:       100 * time.Millisecond,
-		PrometheusURL:          "http://localhost:9090",
+		PrometheusURL:          "http://prometheus.monitoring.svc.cluster.local:9090",
 		KubernetesNamespace:    "default",
 		OutputDirectory:        "./k8s-manifests",
 		BandwidthWeight:        0.4,
@@ -168,6 +168,21 @@ func (lf *LEADFramework) Start(ctx context.Context, graph *models.ServiceGraph) 
 			lf.prometheusMonitor = nil
 		} else {
 			log.Println("Prometheus monitoring initialized successfully")
+
+			// Initialize enhanced Prometheus network monitor
+			prometheusClient := monitoring.NewRealPrometheusClient(lf.config.PrometheusURL)
+			enhancedNetworkMonitor := monitoring.NewEnhancedPrometheusNetworkMonitor(
+				prometheusClient,
+				lf.graph,
+				lf.config.MonitoringInterval,
+			)
+
+			// Start enhanced network monitoring
+			if err := enhancedNetworkMonitor.Start(); err != nil {
+				log.Printf("Warning: Failed to start enhanced network monitoring: %v", err)
+			} else {
+				log.Println("Enhanced Prometheus network monitoring started successfully")
+			}
 		}
 	}
 
@@ -423,6 +438,11 @@ func (lf *LEADFramework) GetConfiguration() *FrameworkConfig {
 // IsRunning returns whether the framework is currently running
 func (lf *LEADFramework) IsRunning() bool {
 	return lf.isRunning
+}
+
+// GetServiceGraph returns the current service graph
+func (lf *LEADFramework) GetServiceGraph() *models.ServiceGraph {
+	return lf.graph
 }
 
 // GetFrameworkStatus returns the current status of the framework
