@@ -1,39 +1,58 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  annotations:
-    kompose.cmd: kompose convert
-    kompose.version: 1.22.0 (955b78124)
-  creationTimestamp: null
-  labels:
-    io.kompose.service: recommendation
-  name: recommendation
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      io.kompose.service: recommendation
-  strategy: {}
-  template:
-    metadata:
-      annotations:
+    annotations:
         kompose.cmd: kompose convert
         kompose.version: 1.22.0 (955b78124)
-      creationTimestamp: null
-      labels:
+    creationTimestamp: null
+    labels:
         io.kompose.service: recommendation
-    spec:
-      containers:
-        - command:
-            - ./recommendation
-          image: deathstarbench/hotel-reservation:latest
-          name: hotel-reserv-recommendation
-          ports:
-            - containerPort: 8085
-          resources:
-            requests:
-              cpu: 100m
-            limits:
-              cpu: 1000m
-      restartPolicy: Always
+    name: recommendation
+spec:
+    replicas: 1
+    selector:
+        matchLabels:
+            io.kompose.service: recommendation
+    strategy: {}
+    template:
+        metadata:
+            annotations:
+                kompose.cmd: kompose convert
+                kompose.version: 1.22.0 (955b78124)
+            creationTimestamp: null
+            labels:
+                io.kompose.service: recommendation
+        spec:
+            affinity:
+                nodeAffinity:
+                    preferredDuringSchedulingIgnoredDuringExecution:
+                        - preference:
+                            matchExpressions:
+                                - key: topology.kubernetes.io/zone
+                                  operator: In
+                                  values:
+                                    - unknown
+                          weight: 96
+                podAffinity:
+                    preferredDuringSchedulingIgnoredDuringExecution:
+                        - podAffinityTerm:
+                            labelSelector:
+                                matchLabels:
+                                    app: mongodb-recommendation
+                                    io.kompose.service: mongodb-recommendation
+                            topologyKey: topology.kubernetes.io/zone
+                          weight: 96
+            containers:
+                - command:
+                    - ./recommendation
+                  image: deathstarbench/hotel-reservation:latest
+                  name: hotel-reserv-recommendation
+                  ports:
+                    - containerPort: 8085
+                  resources:
+                    limits:
+                        cpu: 1000m
+                    requests:
+                        cpu: 100m
+            restartPolicy: Always
 status: {}

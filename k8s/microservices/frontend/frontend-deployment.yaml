@@ -1,39 +1,219 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  annotations:
-    kompose.cmd: kompose convert
-    kompose.version: 1.22.0 (955b78124)
-  creationTimestamp: null
-  labels:
-    io.kompose.service: frontend
-  name: frontend
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      io.kompose.service: frontend
-  strategy: {}
-  template:
-    metadata:
-      annotations:
+    annotations:
         kompose.cmd: kompose convert
         kompose.version: 1.22.0 (955b78124)
-      creationTimestamp: null
-      labels:
+    creationTimestamp: null
+    labels:
         io.kompose.service: frontend
-    spec:
-      containers:
-        - command:
-            - ./frontend
-          image: deathstarbench/hotel-reservation:latest
-          name: hotel-reserv-frontend
-          ports:
-            - containerPort: 5000
-          resources:
-            requests:
-              cpu: 100m
-            limits:
-              cpu: 1000m
-      restartPolicy: Always
+    name: frontend
+spec:
+    replicas: 1
+    selector:
+        matchLabels:
+            io.kompose.service: frontend
+    strategy: {}
+    template:
+        metadata:
+            annotations:
+                kompose.cmd: kompose convert
+                kompose.version: 1.22.0 (955b78124)
+            creationTimestamp: null
+            labels:
+                io.kompose.service: frontend
+        spec:
+            affinity:
+                nodeAffinity:
+                    preferredDuringSchedulingIgnoredDuringExecution:
+                        - preference:
+                            matchExpressions:
+                                - key: topology.kubernetes.io/zone
+                                  operator: In
+                                  values:
+                                    - unknown
+                          weight: 100
+                        - preference:
+                            matchExpressions:
+                                - key: topology.kubernetes.io/zone
+                                  operator: In
+                                  values:
+                                    - unknown
+                          weight: 100
+                        - preference:
+                            matchExpressions:
+                                - key: topology.kubernetes.io/zone
+                                  operator: In
+                                  values:
+                                    - unknown
+                          weight: 100
+                        - preference:
+                            matchExpressions:
+                                - key: topology.kubernetes.io/zone
+                                  operator: In
+                                  values:
+                                    - unknown
+                          weight: 100
+                        - preference:
+                            matchExpressions:
+                                - key: topology.kubernetes.io/zone
+                                  operator: In
+                                  values:
+                                    - unknown
+                          weight: 100
+                        - preference:
+                            matchExpressions:
+                                - key: topology.kubernetes.io/zone
+                                  operator: In
+                                  values:
+                                    - unknown
+                          weight: 100
+                        - preference:
+                            matchExpressions:
+                                - key: topology.kubernetes.io/zone
+                                  operator: In
+                                  values:
+                                    - unknown
+                          weight: 100
+                        - preference:
+                            matchExpressions:
+                                - key: topology.kubernetes.io/zone
+                                  operator: In
+                                  values:
+                                    - unknown
+                          weight: 100
+                        - preference:
+                            matchExpressions:
+                                - key: topology.kubernetes.io/zone
+                                  operator: In
+                                  values:
+                                    - unknown
+                          weight: 96
+                        - preference:
+                            matchExpressions:
+                                - key: topology.kubernetes.io/zone
+                                  operator: In
+                                  values:
+                                    - unknown
+                          weight: 96
+                        - preference:
+                            matchExpressions:
+                                - key: topology.kubernetes.io/zone
+                                  operator: In
+                                  values:
+                                    - unknown
+                          weight: 96
+                        - preference:
+                            matchExpressions:
+                                - key: topology.kubernetes.io/zone
+                                  operator: In
+                                  values:
+                                    - unknown
+                          weight: 96
+                podAffinity:
+                    preferredDuringSchedulingIgnoredDuringExecution:
+                        - podAffinityTerm:
+                            labelSelector:
+                                matchLabels:
+                                    app: mongodb-reservation
+                                    io.kompose.service: mongodb-reservation
+                            topologyKey: topology.kubernetes.io/zone
+                          weight: 100
+                        - podAffinityTerm:
+                            labelSelector:
+                                matchLabels:
+                                    app: memcached-rate
+                                    io.kompose.service: memcached-rate
+                            topologyKey: topology.kubernetes.io/zone
+                          weight: 100
+                        - podAffinityTerm:
+                            labelSelector:
+                                matchLabels:
+                                    app: mongodb-rate
+                                    io.kompose.service: mongodb-rate
+                            topologyKey: topology.kubernetes.io/zone
+                          weight: 100
+                        - podAffinityTerm:
+                            labelSelector:
+                                matchLabels:
+                                    app: mongodb-user
+                                    io.kompose.service: mongodb-user
+                            topologyKey: topology.kubernetes.io/zone
+                          weight: 100
+                        - podAffinityTerm:
+                            labelSelector:
+                                matchLabels:
+                                    app: memcached-profile
+                                    io.kompose.service: memcached-profile
+                            topologyKey: topology.kubernetes.io/zone
+                          weight: 100
+                        - podAffinityTerm:
+                            labelSelector:
+                                matchLabels:
+                                    app: mongodb-profile
+                                    io.kompose.service: mongodb-profile
+                            topologyKey: topology.kubernetes.io/zone
+                          weight: 100
+                        - podAffinityTerm:
+                            labelSelector:
+                                matchLabels:
+                                    app: mongodb-recommendation
+                                    io.kompose.service: mongodb-recommendation
+                            topologyKey: topology.kubernetes.io/zone
+                          weight: 100
+                        - podAffinityTerm:
+                            labelSelector:
+                                matchLabels:
+                                    app: geo
+                                    io.kompose.service: geo
+                            topologyKey: topology.kubernetes.io/zone
+                          weight: 100
+                        - podAffinityTerm:
+                            labelSelector:
+                                matchLabels:
+                                    app: memcached-reservation
+                                    io.kompose.service: memcached-reservation
+                            topologyKey: topology.kubernetes.io/zone
+                          weight: 100
+                        - podAffinityTerm:
+                            labelSelector:
+                                matchLabels:
+                                    app: search
+                                    io.kompose.service: search
+                            topologyKey: topology.kubernetes.io/zone
+                          weight: 96
+                        - podAffinityTerm:
+                            labelSelector:
+                                matchLabels:
+                                    app: user
+                                    io.kompose.service: user
+                            topologyKey: topology.kubernetes.io/zone
+                          weight: 96
+                        - podAffinityTerm:
+                            labelSelector:
+                                matchLabels:
+                                    app: recommendation
+                                    io.kompose.service: recommendation
+                            topologyKey: topology.kubernetes.io/zone
+                          weight: 96
+                        - podAffinityTerm:
+                            labelSelector:
+                                matchLabels:
+                                    app: reservation
+                                    io.kompose.service: reservation
+                            topologyKey: topology.kubernetes.io/zone
+                          weight: 96
+            containers:
+                - command:
+                    - ./frontend
+                  image: deathstarbench/hotel-reservation:latest
+                  name: hotel-reserv-frontend
+                  ports:
+                    - containerPort: 5000
+                  resources:
+                    limits:
+                        cpu: 1000m
+                    requests:
+                        cpu: 100m
+            restartPolicy: Always
 status: {}

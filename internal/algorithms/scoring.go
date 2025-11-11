@@ -9,12 +9,18 @@ import (
 
 // ScoringAlgorithm implements Algorithm 1 from the LEAD framework
 type ScoringAlgorithm struct {
-	graph *models.ServiceGraph
+	graph          *models.ServiceGraph
+	networkMetrics models.InterNodeMetricsProvider
 }
 
 // NewScoringAlgorithm creates a new scoring algorithm instance
 func NewScoringAlgorithm(graph *models.ServiceGraph) *ScoringAlgorithm {
 	return &ScoringAlgorithm{graph: graph}
+}
+
+// SetNetworkMetricsProvider sets the network metrics provider for inter-node metrics
+func (sa *ScoringAlgorithm) SetNetworkMetricsProvider(provider models.InterNodeMetricsProvider) {
+	sa.networkMetrics = provider
 }
 
 // ScorePaths implements Algorithm 1: Scoring
@@ -24,9 +30,16 @@ func NewScoringAlgorithm(graph *models.ServiceGraph) *ScoringAlgorithm {
 // - Number of service-to-service interactions (dependencies)
 // - RPS (Requests Per Second)
 // - Network topology factors (bandwidth, hops, geo distance, availability zone)
+// - Inter-node network metrics (latency, bandwidth between nodes)
 func (sa *ScoringAlgorithm) ScorePaths(gateway string) ([]*models.Path, error) {
 	// Step 1: Find all paths from gateway
 	pathFinder := models.NewPathFinder(sa.graph)
+
+	// Set network metrics provider to use inter-node metrics for path scoring
+	if sa.networkMetrics != nil {
+		pathFinder.SetNetworkMetricsProvider(sa.networkMetrics)
+	}
+
 	paths := pathFinder.FindAllPaths(gateway)
 
 	if len(paths) == 0 {

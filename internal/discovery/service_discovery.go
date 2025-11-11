@@ -120,9 +120,14 @@ func (sd *ServiceDiscovery) discoverServices() error {
 	if _, exists := sd.serviceGraph.GetNode("frontend"); exists {
 		sd.serviceGraph.SetGateway("frontend")
 		log.Printf("Set gateway to: frontend")
+	} else if _, exists := sd.serviceGraph.GetNode("fe"); exists {
+		sd.serviceGraph.SetGateway("fe")
+		log.Printf("Set gateway to: fe")
 	}
 
-	// Add service dependencies based on HotelReservation benchmark
+	// Add service dependencies based on static dependency graph
+	// Note: Consul is used for service registration but is not part of the dependency graph
+	// and its placement does not affect affinity rules
 	sd.addHotelReservationDependencies()
 
 	log.Printf("Discovered %d services: %v", len(sd.serviceGraph.GetAllNodes()), sd.getServiceNames())
@@ -501,33 +506,49 @@ func (sd *ServiceDiscovery) extractPacketLossFromNode(pod *models.PodInfo, nodes
 	return -1 // No dynamic data available
 }
 
-// addHotelReservationDependencies adds the complete dependency graph for HotelReservation benchmark
+// addHotelReservationDependencies adds the complete static dependency graph
+// This matches the static architecture diagram:
+// - Frontend (fe) -> search (src), user (usr), recommendation (rcm), reservation (rsv)
+// - Search (src) -> profile (prf), geo, rate (rte)
+// - Profile (prf) -> prf-mc (memcached), prf-db (mongodb)
+// - Geo -> geo-db (mongodb)
+// - User (usr) -> usr-db (mongodb)
+// - Rate (rte) -> rte-mc (memcached), rte-db (mongodb)
+// - Recommendation (rcm) -> rcm-db (mongodb)
+// - Reservation (rsv) -> rsv-mc (memcached), rsv-db (mongodb)
 func (sd *ServiceDiscovery) addHotelReservationDependencies() {
-	// Complete service dependency graph including microservices, databases, and caches
+	// Static service dependency graph matching the architecture diagram
 	dependencies := map[string][]string{
 		// Frontend (Gateway) - depends on all business services
 		"frontend": {"search", "user", "recommendation", "reservation"},
+		"fe":       {"search", "user", "recommendation", "reservation"}, // Alias
 
-		// Search service - depends on profile, geo, and rate for comprehensive search
+		// Search service - depends on profile, geo, and rate
 		"search": {"profile", "geo", "rate"},
+		"src":    {"profile", "geo", "rate"}, // Alias
 
-		// User service - depends on rate for user-specific pricing + its database
-		"user": {"rate", "mongodb-user"},
-
-		// Profile service - depends on user for profile management + its databases
-		"profile": {"user", "mongodb-profile", "memcached-profile"},
-
-		// Rate service - depends on geo for location-based pricing + its databases
-		"rate": {"geo", "mongodb-rate", "memcached-rate"},
+		// Profile service - depends on its cache and database
+		"profile": {"memcached-profile", "mongodb-profile"},
+		"prf":     {"memcached-profile", "mongodb-profile"}, // Alias
 
 		// Geo service - depends on its database
 		"geo": {"mongodb-geo"},
 
-		// Recommendation service - depends on user, profile, reservation + its database
-		"recommendation": {"user", "profile", "reservation", "mongodb-recommendation"},
+		// User service - depends on its database
+		"user": {"mongodb-user"},
+		"usr":  {"mongodb-user"}, // Alias
 
-		// Reservation service - depends on rate, user, geo + its databases
-		"reservation": {"rate", "user", "geo", "mongodb-reservation", "memcached-reservation"},
+		// Rate service - depends on its cache and database
+		"rate": {"memcached-rate", "mongodb-rate"},
+		"rte":  {"memcached-rate", "mongodb-rate"}, // Alias
+
+		// Recommendation service - depends on its database
+		"recommendation": {"mongodb-recommendation"},
+		"rcm":            {"mongodb-recommendation"}, // Alias
+
+		// Reservation service - depends on its cache and database
+		"reservation": {"memcached-reservation", "mongodb-reservation"},
+		"rsv":         {"memcached-reservation", "mongodb-reservation"}, // Alias
 
 		// Database and Cache Services (leaf nodes - no dependencies)
 		"mongodb-profile":        {},

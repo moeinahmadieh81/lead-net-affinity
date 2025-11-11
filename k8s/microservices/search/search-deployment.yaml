@@ -1,39 +1,86 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  annotations:
-    kompose.cmd: kompose convert
-    kompose.version: 1.22.0 (955b78124)
-  creationTimestamp: null
-  labels:
-    io.kompose.service: search
-  name: search
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      io.kompose.service: search
-  strategy: {}
-  template:
-    metadata:
-      annotations:
+    annotations:
         kompose.cmd: kompose convert
         kompose.version: 1.22.0 (955b78124)
-      creationTimestamp: null
-      labels:
+    creationTimestamp: null
+    labels:
         io.kompose.service: search
-    spec:
-      containers:
-        - command:
-            - ./search
-          image: deathstarbench/hotel-reservation:latest
-          name: hotel-reserv-search
-          ports:
-            - containerPort: 8082
-          resources:
-            requests:
-              cpu: 100m
-            limits:
-              cpu: 1000m
-      restartPolicy: Always
+    name: search
+spec:
+    replicas: 1
+    selector:
+        matchLabels:
+            io.kompose.service: search
+    strategy: {}
+    template:
+        metadata:
+            annotations:
+                kompose.cmd: kompose convert
+                kompose.version: 1.22.0 (955b78124)
+            creationTimestamp: null
+            labels:
+                io.kompose.service: search
+        spec:
+            affinity:
+                nodeAffinity:
+                    preferredDuringSchedulingIgnoredDuringExecution:
+                        - preference:
+                            matchExpressions:
+                                - key: topology.kubernetes.io/zone
+                                  operator: In
+                                  values:
+                                    - unknown
+                          weight: 96
+                        - preference:
+                            matchExpressions:
+                                - key: topology.kubernetes.io/zone
+                                  operator: In
+                                  values:
+                                    - unknown
+                          weight: 96
+                        - preference:
+                            matchExpressions:
+                                - key: topology.kubernetes.io/zone
+                                  operator: In
+                                  values:
+                                    - unknown
+                          weight: 96
+                podAffinity:
+                    preferredDuringSchedulingIgnoredDuringExecution:
+                        - podAffinityTerm:
+                            labelSelector:
+                                matchLabels:
+                                    app: profile
+                                    io.kompose.service: profile
+                            topologyKey: topology.kubernetes.io/zone
+                          weight: 96
+                        - podAffinityTerm:
+                            labelSelector:
+                                matchLabels:
+                                    app: geo
+                                    io.kompose.service: geo
+                            topologyKey: topology.kubernetes.io/zone
+                          weight: 96
+                        - podAffinityTerm:
+                            labelSelector:
+                                matchLabels:
+                                    app: rate
+                                    io.kompose.service: rate
+                            topologyKey: topology.kubernetes.io/zone
+                          weight: 96
+            containers:
+                - command:
+                    - ./search
+                  image: deathstarbench/hotel-reservation:latest
+                  name: hotel-reserv-search
+                  ports:
+                    - containerPort: 8082
+                  resources:
+                    limits:
+                        cpu: 1000m
+                    requests:
+                        cpu: 100m
+            restartPolicy: Always
 status: {}
