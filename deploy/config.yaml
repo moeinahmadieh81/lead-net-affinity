@@ -55,7 +55,7 @@ graph:
       dependsOn: []
 
 prometheus:
-  url: "http://prometheus.monitoring:9090"
+  url: "http://prometheus-kube-prometheus-prometheus.monitoring:9090"
   nodeRTTQuery:       "avg_over_time(cilium_hubble_flow_rtt_seconds_sum[5m]) / avg_over_time(cilium_hubble_flow_rtt_seconds_count[5m])"
   nodeDropRateQuery:  "sum(rate(cilium_drop_count_total[5m])) by (src_node, dst_node)"
   nodeBandwidthQuery: "sum(rate(cilium_bytes_total[5m])) by (src_node, dst_node) / 125000"
