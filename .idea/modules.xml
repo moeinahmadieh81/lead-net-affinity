@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/.idea/Lead_Framework_Extended.iml" filepath="$PROJECT_DIR$/.idea/Lead_Framework_Extended.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/lead-net-affinity.iml" filepath="$PROJECT_DIR$/.idea/lead-net-affinity.iml" />
     </modules>
   </component>
 </project>

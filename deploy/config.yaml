@@ -1,0 +1,80 @@
+namespaceSelector:
+  - hotel-reservation
+
+graph:
+  entry: frontend
+  services:
+    - name: frontend
+      dependsOn: [search, user, recommendation, reservation]
+
+    - name: search
+      dependsOn: [profile, geo, rate]
+
+    - name: profile
+      dependsOn: [memcached-profile, mongodb-profile]
+
+    - name: geo
+      dependsOn: [mongodb-geo]
+
+    - name: rate
+      dependsOn: [memcached-rate, mongodb-rate]
+
+    - name: user
+      dependsOn: [mongodb-user]
+
+    - name: recommendation
+      dependsOn: [mongodb-recommendation]
+
+    - name: reservation
+      dependsOn: [memcached-reserve, mongodb-reservation]
+
+    - name: memcached-profile
+      dependsOn: []
+
+    - name: mongodb-profile
+      dependsOn: []
+
+    - name: mongodb-geo
+      dependsOn: []
+
+    - name: memcached-rate
+      dependsOn: []
+
+    - name: mongodb-rate
+      dependsOn: []
+
+    - name: mongodb-user
+      dependsOn: []
+
+    - name: mongodb-recommendation
+      dependsOn: []
+
+    - name: memcached-reserve
+      dependsOn: []
+
+    - name: mongodb-reservation
+      dependsOn: []
+
+prometheus:
+  url: "http://prometheus.monitoring:9090"
+  nodeRTTQuery:       "avg_over_time(cilium_hubble_flow_rtt_seconds_sum[5m]) / avg_over_time(cilium_hubble_flow_rtt_seconds_count[5m])"
+  nodeDropRateQuery:  "sum(rate(cilium_drop_count_total[5m])) by (src_node, dst_node)"
+  nodeBandwidthQuery: "sum(rate(cilium_bytes_total[5m])) by (src_node, dst_node) / 125000"
+  sampleWindow: "5m"
+
+scoring:
+  pathLengthWeight: 1.0
+  podCountWeight: 1.0
+  serviceEdgesWeight: 1.0
+  rpsWeight: 0.0
+
+  netLatencyWeight: 2.0
+  netDropWeight: 3.0
+  netBandwidthWeight: 1.0
+
+affinity:
+  topPaths: 5
+  minAffinityWeight: 50
+  maxAffinityWeight: 100
+  badLatencyMs: 5
+  badDropRate: 0.01
