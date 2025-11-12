@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: lead-net-affinity
-  namespace: hotel-reservation
+  namespace: default
 spec:
   replicas: 1
   selector:
@@ -17,8 +17,6 @@ spec:
       containers:
         - name: controller
           image: moein81/lead-net-affinity:0.0.1
-          imagePullPolicy: IfNotPresent
-          args: []
           env:
             - name: LEAD_NET_CONFIG
               value: /etc/lead-net-affinity/config.yaml
@@ -27,18 +25,13 @@ spec:
             - name: LEAD_NET_DRYRUN
               value: "true"
           volumeMounts:
-            - name: config
+            - name: cfg
               mountPath: /etc/lead-net-affinity
+          securityContext:
+            runAsNonRoot: true
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
       volumes:
-        - name: config
+        - name: cfg
           configMap:
             name: lead-net-affinity-config
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: lead-net-affinity-config
-  namespace: hotel-reservation
-data:
-  config.yaml: |
-    # paste the config-example.yaml content here (or a variant)

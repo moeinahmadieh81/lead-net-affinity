@@ -1,5 +1,4 @@
-namespaceSelector:
-  - hotel-reservation
+namespaceSelector: ["default"]
 
 graph:
   entry: frontend
