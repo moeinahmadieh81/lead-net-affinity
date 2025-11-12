@@ -1,11 +1,13 @@
 # =========================
 # Stage 1: Build
 # =========================
-FROM golang:1.24 AS builder
+FROM --platform=linux/amd64 golang:1.24 AS builder
 
 # Enable Go modules and stricter builds
 ENV CGO_ENABLED=0 \
-    GO111MODULE=on
+    GO111MODULE=on \
+    GOOS=linux \
+    GOARCH=amd64
 
 WORKDIR /app
 
@@ -22,7 +24,7 @@ RUN go build -o /lead-net-affinity ./cmd/lead-net-affinity
 # =========================
 # Stage 2: Runtime
 # =========================
-FROM gcr.io/distroless/static:nonroot
+FROM --platform=linux/amd64 gcr.io/distroless/static:nonroot
 
 # Where config.yaml will be mounted (matches LEAD_NET_CONFIG default)
 ENV LEAD_NET_CONFIG=/etc/lead-net-affinity/config.yaml

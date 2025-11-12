@@ -16,7 +16,7 @@ spec:
       serviceAccountName: lead-net-affinity
       containers:
         - name: controller
-          image: moein81/lead-net-affinity:0.0.1
+          image: moein81/lead-net-affinity:0.0.2
           env:
             - name: LEAD_NET_CONFIG
               value: /etc/lead-net-affinity/config.yaml
