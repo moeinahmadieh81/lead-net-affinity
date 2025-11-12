@@ -28,7 +28,6 @@ spec:
             - name: cfg
               mountPath: /etc/lead-net-affinity
           securityContext:
-            runAsNonRoot: true
             readOnlyRootFilesystem: true
             allowPrivilegeEscalation: false
       volumes:
