@@ -56,9 +56,9 @@ graph:
 
 prometheus:
   url: "http://prometheus-kube-prometheus-prometheus.monitoring:9090"
-  nodeRTTQuery:       "avg_over_time(cilium_hubble_flow_rtt_seconds_sum[5m]) / avg_over_time(cilium_hubble_flow_rtt_seconds_count[5m])"
-  nodeDropRateQuery:  "sum(rate(cilium_drop_count_total[5m])) by (src_node, dst_node)"
-  nodeBandwidthQuery: "sum(rate(cilium_bytes_total[5m])) by (src_node, dst_node) / 125000"
+  nodeRTTQuery:       ""  # Leave blank since we don't have RTT data
+  nodeDropRateQuery:  "sum(rate(cilium_drop_count_total[5m])) by (src_node, dst_node)"  # Use drop rate
+  nodeBandwidthQuery: ""  # Leave blank since we don't have bandwidth data
   sampleWindow: "5m"
 
 scoring:
@@ -67,9 +67,9 @@ scoring:
   serviceEdgesWeight: 1.0
   rpsWeight: 0.0
 
-  netLatencyWeight: 2.0
-  netDropWeight: 3.0
-  netBandwidthWeight: 1.0
+  netLatencyWeight: 0.0    # Removed as we don't have latency data
+  netDropWeight: 3.0       # Retain drop rate influence (for `cilium_drop_count_total`)
+  netBandwidthWeight: 0.0  # Removed as we don't have bandwidth data
 
 affinity:
   topPaths: 5
