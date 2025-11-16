@@ -24,14 +24,19 @@ RUN go build -o /lead-net-affinity ./cmd/lead-net-affinity
 # =========================
 # Stage 2: Runtime
 # =========================
-# If Prometheus is HTTP, static is fine.
-# If Prometheus is HTTPS, better to use base:nonroot for CA certs.
-FROM gcr.io/distroless/static:nonroot
+# Use a small base with certs so HTTPS Prometheus works too.
+FROM alpine:3.20
+
+# Install CA certs (for HTTPS Prometheus, if ever needed)
+RUN apk add --no-cache ca-certificates
+
+# Create non-root user
+RUN addgroup -S app && adduser -S app -G app
 
 WORKDIR /
 
 COPY --from=builder /lead-net-affinity /lead-net-affinity
 
-USER nonroot:nonroot
+USER app:app
 
 ENTRYPOINT ["/lead-net-affinity"]
