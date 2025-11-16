@@ -132,7 +132,7 @@ func (c *Controller) reconcileOnce(ctx context.Context) error {
 	c.debugf("found %d deployments across namespaces, mapped %d services",
 		len(deploysSlice), len(deploysBySvc))
 
-	// 3) Network metrics
+	// 3) Network metrics (cluster-level aggregates)
 	nm, err := c.prom.FetchNetworkMatrix(
 		ctx,
 		c.cfg.Prometheus.NodeRTTQuery,
@@ -145,10 +145,7 @@ func (c *Controller) reconcileOnce(ctx context.Context) error {
 		c.debugf("fetched network matrix with %d node links", len(nm.Links))
 	}
 
-	// 4) Placement info
-	placements := kube.NewPlacementResolver(c.k8s, c.cfg.NamespaceSelector)
-
-	// 5) Base LEAD scores
+	// 4) Base LEAD scores
 	baseScores := make([]float64, len(paths))
 	for i, p := range paths {
 		in := scoring.BaseInput{
@@ -169,11 +166,11 @@ func (c *Controller) reconcileOnce(ctx context.Context) error {
 		paths[i].BaseScore = normBase[i]
 	}
 
-	// 6) Network penalty + final scores
+	// 5) Network penalty + final scores (cluster-level penalty)
 	finals := make([]float64, len(paths))
 	for i := range paths {
 		p := &paths[i]
-		pen := scoring.ComputeNetworkPenalty(*p, placements, nm, scoring.NetWeights{
+		pen := scoring.ComputeNetworkPenalty(*p, nm, scoring.NetWeights{
 			NetLatencyWeight:   c.cfg.Scoring.NetLatencyWeight,
 			NetDropWeight:      c.cfg.Scoring.NetDropWeight,
 			NetBandwidthWeight: c.cfg.Scoring.NetBandwidthWeight,
@@ -189,12 +186,12 @@ func (c *Controller) reconcileOnce(ctx context.Context) error {
 		paths[i].FinalScore = normFinal[i]
 	}
 
-	// 7) Sort by final score
+	// 6) Sort by final score
 	sort.Slice(paths, func(i, j int) bool {
 		return paths[i].FinalScore > paths[j].FinalScore
 	})
 
-	// 8) Top-K
+	// 7) Top-K
 	top := c.cfg.Affinity.TopPaths
 	if top <= 0 || top > len(paths) {
 		top = len(paths)
@@ -212,7 +209,7 @@ func (c *Controller) reconcileOnce(ctx context.Context) error {
 		MaxAffinityWeight: c.cfg.Affinity.MaxAffinityWeight,
 	}
 
-	// 9) Generate affinities (in-memory)
+	// 8) Generate affinities (in-memory)
 	for i := 0; i < top; i++ {
 		p := paths[i]
 		c.debugf("generating affinity for path[%d]: %s (score=%.1f)",
@@ -220,11 +217,10 @@ func (c *Controller) reconcileOnce(ctx context.Context) error {
 		rulegen.GenerateAffinityForPath(deploysBySvc, p, p.FinalScore, affCfg)
 	}
 
-	// 10) Apply or dry-run
+	// 9) Apply or dry-run
 	updated := 0
 	for _, d := range deploysBySvc {
 		if c.dryRun {
-			// We don't have change-diffing here; assume candidates are touched.
 			c.infof("dry-run: would update deployment %s/%s", d.Namespace, d.Name)
 			continue
 		}

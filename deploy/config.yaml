@@ -56,24 +56,41 @@ graph:
 
 prometheus:
   url: "http://prometheus-kube-prometheus-prometheus.monitoring:9090"
-  nodeRTTQuery:       ""  # Leave blank since we don't have RTT data
-  nodeDropRateQuery:  "sum(rate(cilium_drop_count_total[5m])) by (src_node, dst_node)"  # Use drop rate
-  nodeBandwidthQuery: ""  # Leave blank since we don't have bandwidth data
-  sampleWindow: "5m"
+
+  nodeRTTQuery: |
+    histogram_quantile(
+      0.5,
+      sum(
+        rate(cilium_node_health_connectivity_latency_seconds_bucket[10m])
+      ) by (instance, le)
+    )
+
+  nodeDropRateQuery: |
+    sum(
+      rate(cilium_drop_bytes_total[10m])
+    ) by (instance)
+
+  nodeBandwidthQuery: |
+    sum(
+      rate(hubble_flows_processed_total[10m])
+    ) by (instance)
+
+  sampleWindow: "10m"
 
 scoring:
-  pathLengthWeight: 1.0
-  podCountWeight: 1.0
-  serviceEdgesWeight: 1.0
-  rpsWeight: 0.0
+  pathLengthWeight:     1.0
+  podCountWeight:       1.0
+  serviceEdgesWeight:   1.0
+  rpsWeight:            0.0
 
-  netLatencyWeight: 0.0    # Removed as we don't have latency data
-  netDropWeight: 3.0       # Retain drop rate influence (for `cilium_drop_count_total`)
-  netBandwidthWeight: 0.0  # Removed as we don't have bandwidth data
+  # Start simple; adjust once you see real numbers
+  netLatencyWeight:     1.0
+  netDropWeight:        3.0
+  netBandwidthWeight:   0.0   # keep off at first until you decide how to interpret it
 
 affinity:
-  topPaths: 5
-  minAffinityWeight: 50
-  maxAffinityWeight: 100
-  badLatencyMs: 5
-  badDropRate: 0.01
+  topPaths:           5
+  minAffinityWeight:  50
+  maxAffinityWeight:  100
+  badLatencyMs:       5       # “above ~5ms median is suspicious”
+  badDropRate:        1e5     # tune based on observed values in Prometheus

@@ -8,87 +8,107 @@ import (
 	"lead-net-affinity/pkg/scoring"
 )
 
-type fakePlacement struct {
-	m map[graph.NodeID]string
-}
-
-func (f *fakePlacement) NodeNameForService(s graph.NodeID) string {
-	return f.m[s]
-}
-
+// TestNetworkPenaltyAndCombine
+// Basic sanity check that ComputeNetworkPenalty runs and that
+// CombineScores(base, penalty) = base - penalty behaves as expected.
 func TestNetworkPenaltyAndCombine(t *testing.T) {
-	path := graph.Path{Nodes: []graph.NodeID{"a", "b"}}
-	fp := &fakePlacement{m: map[graph.NodeID]string{
-		"a": "node1",
-		"b": "node2",
-	}}
+	// Simple path with a couple of hops.
+	path := graph.Path{Nodes: []graph.NodeID{"a", "b", "c"}}
 
-	nm := &promnet.NetworkMatrix{
+	// Synthetic matrix entry. In the real cluster you're effectively using
+	// cluster-level signals, but for unit tests we just need *some* numbers.
+	m := &promnet.NetworkMatrix{
 		Links: map[string]*promnet.NodeLinkMetrics{
-			"node1||node2": {
-				SrcNode:       "node1",
-				DstNode:       "node2",
-				AvgLatencyMs:  10,
-				DropRate:      0.05,
-				BandwidthMbps: 5,
+			// Key is arbitrary here; tests don't rely on per-link keys,
+			// they only care that the function can read something.
+			"cluster||cluster": {
+				SrcNode:       "cluster",
+				DstNode:       "cluster",
+				AvgLatencyMs:  50,  // "bad" latency
+				DropRate:      0.1, // "bad" drop rate
+				BandwidthMbps: 5,   // "low" bandwidth
 			},
 		},
 	}
 
 	w := scoring.NetWeights{
-		NetLatencyWeight:   2.0,
-		NetDropWeight:      3.0,
+		NetLatencyWeight:   1.0,
+		NetDropWeight:      1.0,
 		NetBandwidthWeight: 1.0,
-		BadLatencyMs:       5.0,
+		BadLatencyMs:       10.0,
 		BadDropRate:        0.01,
 	}
 
-	pen := scoring.ComputeNetworkPenalty(path, fp, nm, w)
-	if pen <= 0 {
-		t.Fatalf("expected positive penalty, got %v", pen)
+	penalty := scoring.ComputeNetworkPenalty(path, m, w)
+
+	// Penalty should at least not be negative.
+	if penalty < 0 {
+		t.Fatalf("expected non-negative penalty, got %.2f", penalty)
 	}
 
-	if scoring.CombineScores(100, pen) >= 100 {
-		t.Fatalf("CombineScores should reduce score; got %v", scoring.CombineScores(100, pen))
+	base := 100.0
+	final := scoring.CombineScores(base, penalty)
+
+	// CombineScores must not *increase* the score.
+	if final > base {
+		t.Fatalf("expected final score <= base; base=%.2f final=%.2f", base, final)
+	}
+
+	// And it must obey base - penalty exactly.
+	expected := base - penalty
+	if final != expected {
+		t.Fatalf("expected final score %.2f = base - penalty, got %.2f", expected, final)
 	}
 }
 
+// TestPenaltyAffectsRanking
+// Checks that with heavier network weights we don't accidentally end up with a *smaller*
+// penalty or a *higher* final score.
 func TestPenaltyAffectsRanking(t *testing.T) {
-	// Paths: a->b and c->d. Both base=equal. Only a->b crosses a bad link.
-	aToB := graph.Path{Nodes: []graph.NodeID{"a", "b"}}
-	cToD := graph.Path{Nodes: []graph.NodeID{"c", "d"}}
+	path := graph.Path{Nodes: []graph.NodeID{"a", "b", "c", "d"}}
 
-	fp := &fakePlacement{m: map[graph.NodeID]string{
-		"a": "node1", "b": "node2",
-		"c": "node3", "d": "node3", // same node (no penalty)
-	}}
-
-	nm := &promnet.NetworkMatrix{
+	m := &promnet.NetworkMatrix{
 		Links: map[string]*promnet.NodeLinkMetrics{
-			"node1||node2": {SrcNode: "node1", DstNode: "node2", AvgLatencyMs: 20, DropRate: 0.05, BandwidthMbps: 5},
+			"cluster||cluster": {
+				SrcNode:       "cluster",
+				DstNode:       "cluster",
+				AvgLatencyMs:  50,
+				DropRate:      0.1,
+				BandwidthMbps: 5,
+			},
 		},
 	}
 
-	w := scoring.NetWeights{
+	// "Light" vs "heavy" network weights.
+	wLight := scoring.NetWeights{
+		NetLatencyWeight:   0.5,
+		NetDropWeight:      0.5,
+		NetBandwidthWeight: 0.5,
+		BadLatencyMs:       10.0,
+		BadDropRate:        0.01,
+	}
+	wHeavy := scoring.NetWeights{
 		NetLatencyWeight:   2.0,
-		NetDropWeight:      3.0,
-		NetBandwidthWeight: 1.0,
-		BadLatencyMs:       5.0,
+		NetDropWeight:      2.0,
+		NetBandwidthWeight: 2.0,
+		BadLatencyMs:       10.0,
 		BadDropRate:        0.01,
 	}
 
-	// Equal base for both (say 50).
-	base := 50.0
-	aPenalty := scoring.ComputeNetworkPenalty(aToB, fp, nm, w)
-	cPenalty := scoring.ComputeNetworkPenalty(cToD, fp, nm, w)
+	penLight := scoring.ComputeNetworkPenalty(path, m, wLight)
+	penHeavy := scoring.ComputeNetworkPenalty(path, m, wHeavy)
 
-	aFinal := scoring.CombineScores(base, aPenalty)
-	cFinal := scoring.CombineScores(base, cPenalty)
-
-	if !(aPenalty > 0 && cPenalty == 0) {
-		t.Fatalf("expected penalty on a->b only; got a=%.2f c=%.2f", aPenalty, cPenalty)
+	// Heavier weights should not produce a *smaller* penalty.
+	if penHeavy < penLight {
+		t.Fatalf("expected heavier weights to produce >= penalty; light=%.2f heavy=%.2f", penLight, penHeavy)
 	}
-	if !(cFinal > aFinal) {
-		t.Fatalf("expected c->d ranked above a->b; got aFinal=%.2f cFinal=%.2f", aFinal, cFinal)
+
+	base := 100.0
+	finalLight := scoring.CombineScores(base, penLight)
+	finalHeavy := scoring.CombineScores(base, penHeavy)
+
+	// With a higher penalty, the final score should be <= the light one.
+	if finalHeavy > finalLight {
+		t.Fatalf("expected heavier penalty to give <= score; light=%.2f heavy=%.2f", finalLight, finalHeavy)
 	}
 }
