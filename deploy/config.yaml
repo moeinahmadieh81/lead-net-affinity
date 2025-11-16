@@ -83,14 +83,15 @@ scoring:
   serviceEdgesWeight:   1.0
   rpsWeight:            0.0
 
-  # Start simple; adjust once you see real numbers
-  netLatencyWeight:     1.0
+  netLatencyWeight:     2.0   # make latency matter more
   netDropWeight:        3.0
-  netBandwidthWeight:   0.0   # keep off at first until you decide how to interpret it
+  netBandwidthWeight:   1.0   # turn on bandwidth influence
 
 affinity:
   topPaths:           5
   minAffinityWeight:  50
   maxAffinityWeight:  100
-  badLatencyMs:       5       # “above ~5ms median is suspicious”
-  badDropRate:        1e5     # tune based on observed values in Prometheus
+
+  # much tighter thresholds now:
+  badLatencyMs:       0.05    # median > 0.05ms => penalize
+  badDropRate:        100     # >100 bytes/sec drop => penalize
