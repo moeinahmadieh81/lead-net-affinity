@@ -93,5 +93,5 @@ affinity:
   maxAffinityWeight:  100
 
   # much tighter thresholds now:
-  badLatencyMs:       0.05    # median > 0.05ms => penalize
-  badDropRate:        100     # >100 bytes/sec drop => penalize
+  badLatencyMs: 0.01    # 0.01 ms = 10 microseconds
+  badDropRate:  1000    # tune based on what you see in Prom
