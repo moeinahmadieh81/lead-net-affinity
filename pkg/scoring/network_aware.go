@@ -5,64 +5,76 @@ import (
 	promnet "lead-net-affinity/pkg/prometheus"
 )
 
-// NetWeights control how strongly each signal contributes to penalty.
+// NetWeights configures how much each network signal matters.
 type NetWeights struct {
 	NetLatencyWeight   float64
 	NetDropWeight      float64
 	NetBandwidthWeight float64
-	BadLatencyMs       float64
-	BadDropRate        float64
+
+	// Thresholds beyond which we start treating the metric as "bad".
+	BadLatencyMs float64
+	BadDropRate  float64
 }
 
-// PodPlacement tells us which node a service currently runs on.
+// PodPlacement is implemented by kube.PlacementResolver.
 type PodPlacement interface {
+	// NodeNameForService returns the node name (or empty string) for a service.
 	NodeNameForService(svc graph.NodeID) string
 }
 
-// nodeSeverityForMetrics converts raw node metrics into a scalar "badness".
-func nodeSeverityForMetrics(m *promnet.NodeMetrics, w NetWeights) float64 {
+// NodeSeverityFromMetrics converts per-node metrics into a scalar penalty.
+//
+// Larger values mean "worse" nodes. If a metric is missing or thresholds are
+// not configured, that signal simply contributes 0.
+func NodeSeverityFromMetrics(m *promnet.NodeMetrics, w NetWeights) float64 {
 	if m == nil {
 		return 0
 	}
 
-	var sev float64
+	var penalty float64
 
-	// Latency: higher than BadLatencyMs is bad.
-	if w.BadLatencyMs > 0 && m.AvgLatencyMs > w.BadLatencyMs {
-		sev += w.NetLatencyWeight * (m.AvgLatencyMs / w.BadLatencyMs)
+	// Latency: penalize only when above BadLatencyMs.
+	if w.NetLatencyWeight > 0 && w.BadLatencyMs > 0 && m.AvgLatencyMs > w.BadLatencyMs {
+		// Example: if latency is 2x the "bad" threshold, factor ~1.0
+		factor := (m.AvgLatencyMs / w.BadLatencyMs) - 1.0
+		if factor < 0 {
+			factor = 0
+		}
+		penalty += w.NetLatencyWeight * factor
 	}
 
-	// Drop: higher than BadDropRate is bad.
-	if w.BadDropRate > 0 && m.DropRate > w.BadDropRate {
-		sev += w.NetDropWeight * (m.DropRate / w.BadDropRate)
+	// Drops: always bad once non-trivial. Scale by threshold.
+	if w.NetDropWeight > 0 && w.BadDropRate > 0 && m.DropRate > 0 {
+		factor := m.DropRate / w.BadDropRate
+		if factor < 0 {
+			factor = 0
+		}
+		penalty += w.NetDropWeight * factor
 	}
 
-	// Flow / bandwidth:
-	// For now we treat "more flow" as "more loaded", so higher = more penalty.
-	// You can tune NetBandwidthWeight to control how strong this is.
+	// Flow rate: you said "flow rate does matter". Here we treat *high* flow
+	// as "pressure" on the node. You can tune NetBandwidthWeight to decide how
+	// strongly this matters. If you later decide that high flow is *good*
+	// (well-utilized), you can invert this logic instead.
 	if w.NetBandwidthWeight > 0 && m.BandwidthRate > 0 {
-		sev += w.NetBandwidthWeight * m.BandwidthRate
+		penalty += w.NetBandwidthWeight * m.BandwidthRate
 	}
 
-	return sev
+	return penalty
 }
 
-// ComputeNetworkPenalty now:
-//   - walks the path's services,
-//   - looks up which node each service is on,
-//   - sums the severity of the UNIQUE nodes touched by that path.
+// ComputeNetworkPenalty computes a per-path penalty by:
+//  1. Looking at which nodes the services in the path are actually running on.
+//  2. Summing per-node severity for the *unique* nodes along that path.
 //
-// No cluster-wide averaging, no pair links.
+// This is no longer a cluster-wide average; it's strictly path-topology dependent.
 func ComputeNetworkPenalty(
 	path graph.Path,
 	placements PodPlacement,
 	matrix *promnet.NetworkMatrix,
 	w NetWeights,
 ) float64 {
-	if matrix == nil || len(matrix.Nodes) == 0 {
-		return 0
-	}
-	if w.NetLatencyWeight == 0 && w.NetDropWeight == 0 && w.NetBandwidthWeight == 0 {
+	if matrix == nil || placements == nil {
 		return 0
 	}
 
@@ -75,24 +87,21 @@ func ComputeNetworkPenalty(
 			continue
 		}
 		if _, ok := seenNodes[nodeName]; ok {
-			continue // don't double-count same node on same path
+			// Only penalize each node once per path.
+			continue
 		}
 		seenNodes[nodeName] = struct{}{}
 
-		m := matrix.GetNode(nodeName)
-		if m == nil {
-			// Node exists but we have no metrics: small default penalty.
-			penalty += 1.0
-			continue
-		}
-
-		penalty += nodeSeverityForMetrics(m, w)
+		metrics := matrix.GetNode(nodeName)
+		penalty += NodeSeverityFromMetrics(metrics, w)
 	}
 
 	return penalty
 }
 
-// CombineScores subtracts the penalty from the base LEAD score.
+// CombineScores merges base LEAD score and network penalty into a final score.
+//
+// Larger final scores are better, so we subtract the penalty.
 func CombineScores(base, penalty float64) float64 {
 	return base - penalty
 }
