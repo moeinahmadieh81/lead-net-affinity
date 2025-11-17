@@ -8,25 +8,26 @@ import (
 )
 
 const (
+	// This IP belongs to the master node; we don't want to use it for scoring.
 	MasterNodeIP = "202.133.88.12"
 )
 
 // NodeMetrics holds per-node network signals derived from Prometheus.
 type NodeMetrics struct {
-	NodeID        string  // normalized node identifier (e.g. "91.228.186.28")
+	NodeID        string  // normalized node identifier (node name if possible)
 	AvgLatencyMs  float64 // p50 latency in ms
-	DropRate      float64 // drop bytes rate (whatever unit your query returns)
+	DropRate      float64 // drop bytes rate (unit depends on query)
 	BandwidthRate float64 // flow rate (e.g. flows/sec)
 }
 
-// NetworkMatrix now holds *per-node* metrics instead of src/dst pairs.
+// NetworkMatrix now holds *per-node* metrics.
 type NetworkMatrix struct {
 	Nodes map[string]*NodeMetrics
 }
 
 // GetNode returns metrics for a given node ID (or nil if missing).
 func (nm *NetworkMatrix) GetNode(nodeID string) *NodeMetrics {
-	if nm == nil {
+	if nm == nil || nm.Nodes == nil {
 		return nil
 	}
 	return nm.Nodes[nodeID]
@@ -77,21 +78,33 @@ func (c *Client) FetchNetworkMatrix(
 
 		for _, r := range res.Data.Result {
 			inst := r.Metric["instance"]
-			if inst == "" || isMasterInstance(inst) {
-				log.Printf("[lead-net][debug] skipping latency sample for instance=%q (empty or master)", inst)
+			nodeLabel := r.Metric["node"]
+
+			// Ignore master
+			if inst != "" && isMasterInstance(inst) {
+				log.Printf("[lead-net][debug] skipping latency sample for master instance=%q", inst)
 				continue
 			}
-			nodeID := normalizeInstance(inst)
+
+			// Prefer the Kubernetes node name if present.
+			nodeID := nodeLabel
+			if nodeID == "" {
+				nodeID = normalizeInstance(inst)
+			}
+			if nodeID == "" {
+				log.Printf("[lead-net][debug] skipping latency sample: no usable nodeID (instance=%q node=%q)", inst, nodeLabel)
+				continue
+			}
 
 			valStr, _ := r.Value[1].(string)
 			v, _ := strconv.ParseFloat(valStr, 64) // seconds
-			m := nm.getOrCreate(nodeID)
-			m.AvgLatencyMs = v * 1000.0
+			latMs := v * 1000.0
 
-			log.Printf(
-				"[lead-net][debug] latency node=%s instance=%s raw_sec=%.6f latency_ms=%.6f",
-				nodeID, inst, v, m.AvgLatencyMs,
-			)
+			m := nm.getOrCreate(nodeID)
+			m.AvgLatencyMs = latMs
+
+			log.Printf("[lead-net][debug] latency node=%s instance=%s raw_sec=%s latency_ms=%f",
+				nodeID, inst, valStr, latMs)
 		}
 	}
 
@@ -105,21 +118,30 @@ func (c *Client) FetchNetworkMatrix(
 
 		for _, r := range res.Data.Result {
 			inst := r.Metric["instance"]
-			if inst == "" || isMasterInstance(inst) {
-				log.Printf("[lead-net][debug] skipping drop sample for instance=%q (empty or master)", inst)
+			nodeLabel := r.Metric["node"]
+
+			if inst != "" && isMasterInstance(inst) {
+				log.Printf("[lead-net][debug] skipping drop sample for master instance=%q", inst)
 				continue
 			}
-			nodeID := normalizeInstance(inst)
+
+			nodeID := nodeLabel
+			if nodeID == "" {
+				nodeID = normalizeInstance(inst)
+			}
+			if nodeID == "" {
+				log.Printf("[lead-net][debug] skipping drop sample: no usable nodeID (instance=%q node=%q)", inst, nodeLabel)
+				continue
+			}
 
 			valStr, _ := r.Value[1].(string)
 			v, _ := strconv.ParseFloat(valStr, 64)
+
 			m := nm.getOrCreate(nodeID)
 			m.DropRate = v
 
-			log.Printf(
-				"[lead-net][debug] drop node=%s instance=%s drop_rate=%.6f",
-				nodeID, inst, m.DropRate,
-			)
+			log.Printf("[lead-net][debug] drop node=%s instance=%s drop_rate=%f",
+				nodeID, inst, v)
 		}
 	}
 
@@ -133,30 +155,38 @@ func (c *Client) FetchNetworkMatrix(
 
 		for _, r := range res.Data.Result {
 			inst := r.Metric["instance"]
-			if inst == "" || isMasterInstance(inst) {
-				log.Printf("[lead-net][debug] skipping bandwidth sample for instance=%q (empty or master)", inst)
+			nodeLabel := r.Metric["node"]
+
+			if inst != "" && isMasterInstance(inst) {
+				log.Printf("[lead-net][debug] skipping bandwidth sample for master instance=%q", inst)
 				continue
 			}
-			nodeID := normalizeInstance(inst)
+
+			nodeID := nodeLabel
+			if nodeID == "" {
+				nodeID = normalizeInstance(inst)
+			}
+			if nodeID == "" {
+				log.Printf("[lead-net][debug] skipping bandwidth sample: no usable nodeID (instance=%q node=%q)", inst, nodeLabel)
+				continue
+			}
 
 			valStr, _ := r.Value[1].(string)
 			v, _ := strconv.ParseFloat(valStr, 64)
+
 			m := nm.getOrCreate(nodeID)
 			m.BandwidthRate = v
 
-			log.Printf(
-				"[lead-net][debug] bandwidth node=%s instance=%s flow_rate=%.6f",
-				nodeID, inst, m.BandwidthRate,
-			)
+			log.Printf("[lead-net][debug] bandwidth node=%s instance=%s flow_rate=%f",
+				nodeID, inst, v)
 		}
 	}
 
+	// Final summary
 	log.Printf("[lead-net][debug] built NetworkMatrix with %d nodes", len(nm.Nodes))
-	for id, n := range nm.Nodes {
-		log.Printf(
-			"[lead-net][debug] node summary id=%s latency_ms=%.6f drop=%.6f flow=%.6f",
-			id, n.AvgLatencyMs, n.DropRate, n.BandwidthRate,
-		)
+	for id, m := range nm.Nodes {
+		log.Printf("[lead-net][debug] node summary id=%s latency_ms=%f drop=%f flow=%f",
+			id, m.AvgLatencyMs, m.DropRate, m.BandwidthRate)
 	}
 
 	return nm, nil

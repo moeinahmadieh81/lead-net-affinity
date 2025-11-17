@@ -132,7 +132,10 @@ func (c *Controller) reconcileOnce(ctx context.Context) error {
 	c.debugf("found %d deployments across namespaces, mapped %d services",
 		len(deploysSlice), len(deploysBySvc))
 
-	// 3) Network metrics (per-node)
+	// 3) Placement info (used for per-node network penalty)
+	placements := kube.NewPlacementResolver(c.k8s, c.cfg.NamespaceSelector)
+
+	// 4) Network metrics (per-node)
 	nm, err := c.prom.FetchNetworkMatrix(
 		ctx,
 		c.cfg.Prometheus.NodeRTTQuery,
@@ -145,9 +148,6 @@ func (c *Controller) reconcileOnce(ctx context.Context) error {
 		c.debugf("fetched network matrix with %d nodes", len(nm.Nodes))
 	}
 
-	// 4) Placement info (which service is on which node)
-	placements := kube.NewPlacementResolver(c.k8s, c.cfg.NamespaceSelector)
-
 	// 5) Base LEAD scores
 	baseScores := make([]float64, len(paths))
 	for i, p := range paths {
@@ -155,7 +155,7 @@ func (c *Controller) reconcileOnce(ctx context.Context) error {
 			PathLength:       len(p.Nodes),
 			PodCount:         scoring.EstimatePodCount(p),
 			ServiceEdgeCount: scoring.EstimateServiceEdges(p),
-			RPS:              0,
+			RPS:              0, // hook RPS here if you want
 		}
 		baseScores[i] = scoring.BaseScore(in, scoring.Weights{
 			PathLengthWeight:   c.cfg.Scoring.PathLengthWeight,
@@ -169,7 +169,7 @@ func (c *Controller) reconcileOnce(ctx context.Context) error {
 		paths[i].BaseScore = normBase[i]
 	}
 
-	// 6) Network penalty + final scores (node-aware)
+	// 6) Network penalty + final scores (per-path, based on per-node severity)
 	finals := make([]float64, len(paths))
 	for i := range paths {
 		p := &paths[i]
