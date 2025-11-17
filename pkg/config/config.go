@@ -19,9 +19,9 @@ type ServiceGraphConfig struct {
 
 type PrometheusConfig struct {
 	URL                string `yaml:"url"`
-	NodeRTTQuery       string `yaml:"nodeRTTQuery"`
-	NodeDropRateQuery  string `yaml:"nodeDropRateQuery"`
-	NodeBandwidthQuery string `yaml:"nodeBandwidthQuery"`
+	NodeRTTQuery       string `yaml:"NodeRTTQuery"`
+	NodeDropRateQuery  string `yaml:"NodeDropRateQuery"`
+	NodeBandwidthQuery string `yaml:"NodeBandwidthQuery"`
 	SampleWindow       string `yaml:"sampleWindow"`
 }
 

@@ -78,20 +78,15 @@ prometheus:
   sampleWindow: "10m"
 
 scoring:
-  # Base weights
-  pathLengthWeight:     1.0
-  podCountWeight:       1.0
-  serviceEdgesWeight:   1.0
-  rpsWeight:            0.0
+  # Normalize severity: define what "bad" means ❗
+  badLatencyMs:   80
+  badDropRate:    5
+  badBandwidthRate: 12
 
-  # Network weight importance
-  netLatencyWeight:     2.0
-  netDropWeight:        3.0
-  netBandwidthWeight:   1.0
-
-  # Node penalty thresholds
-  badLatencyMs:   100.0
-  badDropRate:    10000
+  # Increase importance of these dimensions
+  netLatencyWeight:     3
+  netDropWeight:        5
+  netBandwidthWeight:   2
 
 affinity:
   topPaths:           5
