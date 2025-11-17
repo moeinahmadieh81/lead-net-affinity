@@ -2,12 +2,12 @@ package prometheus
 
 import (
 	"context"
+	"log"
 	"strconv"
 	"strings"
 )
 
 const (
-	// IP of the master node – we ignore its metrics for path penalties.
 	MasterNodeIP = "202.133.88.12"
 )
 
@@ -73,9 +73,12 @@ func (c *Client) FetchNetworkMatrix(
 		if err != nil {
 			return nil, err
 		}
+		log.Printf("[lead-net][debug] latency query returned %d series", len(res.Data.Result))
+
 		for _, r := range res.Data.Result {
 			inst := r.Metric["instance"]
 			if inst == "" || isMasterInstance(inst) {
+				log.Printf("[lead-net][debug] skipping latency sample for instance=%q (empty or master)", inst)
 				continue
 			}
 			nodeID := normalizeInstance(inst)
@@ -84,6 +87,11 @@ func (c *Client) FetchNetworkMatrix(
 			v, _ := strconv.ParseFloat(valStr, 64) // seconds
 			m := nm.getOrCreate(nodeID)
 			m.AvgLatencyMs = v * 1000.0
+
+			log.Printf(
+				"[lead-net][debug] latency node=%s instance=%s raw_sec=%.6f latency_ms=%.6f",
+				nodeID, inst, v, m.AvgLatencyMs,
+			)
 		}
 	}
 
@@ -93,9 +101,12 @@ func (c *Client) FetchNetworkMatrix(
 		if err != nil {
 			return nil, err
 		}
+		log.Printf("[lead-net][debug] drop query returned %d series", len(res.Data.Result))
+
 		for _, r := range res.Data.Result {
 			inst := r.Metric["instance"]
 			if inst == "" || isMasterInstance(inst) {
+				log.Printf("[lead-net][debug] skipping drop sample for instance=%q (empty or master)", inst)
 				continue
 			}
 			nodeID := normalizeInstance(inst)
@@ -104,6 +115,11 @@ func (c *Client) FetchNetworkMatrix(
 			v, _ := strconv.ParseFloat(valStr, 64)
 			m := nm.getOrCreate(nodeID)
 			m.DropRate = v
+
+			log.Printf(
+				"[lead-net][debug] drop node=%s instance=%s drop_rate=%.6f",
+				nodeID, inst, m.DropRate,
+			)
 		}
 	}
 
@@ -113,9 +129,12 @@ func (c *Client) FetchNetworkMatrix(
 		if err != nil {
 			return nil, err
 		}
+		log.Printf("[lead-net][debug] bandwidth/flow query returned %d series", len(res.Data.Result))
+
 		for _, r := range res.Data.Result {
 			inst := r.Metric["instance"]
 			if inst == "" || isMasterInstance(inst) {
+				log.Printf("[lead-net][debug] skipping bandwidth sample for instance=%q (empty or master)", inst)
 				continue
 			}
 			nodeID := normalizeInstance(inst)
@@ -124,7 +143,20 @@ func (c *Client) FetchNetworkMatrix(
 			v, _ := strconv.ParseFloat(valStr, 64)
 			m := nm.getOrCreate(nodeID)
 			m.BandwidthRate = v
+
+			log.Printf(
+				"[lead-net][debug] bandwidth node=%s instance=%s flow_rate=%.6f",
+				nodeID, inst, m.BandwidthRate,
+			)
 		}
+	}
+
+	log.Printf("[lead-net][debug] built NetworkMatrix with %d nodes", len(nm.Nodes))
+	for id, n := range nm.Nodes {
+		log.Printf(
+			"[lead-net][debug] node summary id=%s latency_ms=%.6f drop=%.6f flow=%.6f",
+			id, n.AvgLatencyMs, n.DropRate, n.BandwidthRate,
+		)
 	}
 
 	return nm, nil
