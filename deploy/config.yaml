@@ -57,7 +57,7 @@ graph:
 prometheus:
   url: "http://prometheus-kube-prometheus-prometheus.monitoring:9090"
 
-  nodeRTTQuery: |
+  NodeRTTQuery: |
     histogram_quantile(
       0.5,
       sum(
@@ -65,12 +65,12 @@ prometheus:
       ) by (instance, le)
     )
 
-  nodeDropRateQuery: |
+  NodeDropRateQuery: |
     sum(
       rate(cilium_drop_bytes_total[10m])
     ) by (instance)
 
-  nodeBandwidthQuery: |
+  NodeBandwidthQuery: |
     sum(
       rate(hubble_flows_processed_total[10m])
     ) by (instance)
@@ -78,37 +78,22 @@ prometheus:
   sampleWindow: "10m"
 
 scoring:
-  #
-  # Base LEAD scoring (unchanged)
-  #
+  # Base weights
   pathLengthWeight:     1.0
   podCountWeight:       1.0
   serviceEdgesWeight:   1.0
   rpsWeight:            0.0
 
-  #
-  # Per-node severity weights:
-  # How much each dimension should influence placement.
-  #
-  netLatencyWeight:     2.0      # high latency should strongly penalize
-  netDropWeight:        3.0      # drops are severe
-  netBandwidthWeight:   1.0      # higher flow rate = busier node
+  # Network weight importance
+  netLatencyWeight:     2.0
+  netDropWeight:        3.0
+  netBandwidthWeight:   1.0
 
-  #
-  # Interpretation thresholds for severity normalization:
-  #
-  badLatencyMs:   100.0   # ~100ms considered "bad" for nano-services
-  badDropRate:    10000   # depends on real traffic
-  badBandwidthRate: 20.0  # nodes above ~20 flows/sec are "busy"
+  # Node penalty thresholds
+  badLatencyMs:   100.0
+  badDropRate:    10000
 
 affinity:
-  #
-  # How many top paths affect pod affinity
-  #
   topPaths:           5
-
-  #
-  # Kubernetes affinity weights turned into 1–100 range
-  #
   minAffinityWeight:  50
   maxAffinityWeight:  100

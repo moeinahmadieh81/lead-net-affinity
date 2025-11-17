@@ -66,12 +66,16 @@ func (c *Client) FetchNetworkMatrix(
 	latencyQuery, dropQuery, bwQuery string,
 ) (*NetworkMatrix, error) {
 
+	log.Printf("[lead-net][debug] FetchNetworkMatrix start latencyQuery=%q dropQuery=%q bwQuery=%q",
+		latencyQuery, dropQuery, bwQuery)
+
 	nm := &NetworkMatrix{Nodes: make(map[string]*NodeMetrics)}
 
 	// 1) Latency (seconds -> ms)
 	if latencyQuery != "" {
 		res, err := c.Query(ctx, latencyQuery)
 		if err != nil {
+			log.Printf("[lead-net][debug] latency query %q failed: %v", latencyQuery, err)
 			return nil, err
 		}
 		log.Printf("[lead-net][debug] latency query returned %d series", len(res.Data.Result))
@@ -96,8 +100,18 @@ func (c *Client) FetchNetworkMatrix(
 				continue
 			}
 
-			valStr, _ := r.Value[1].(string)
-			v, _ := strconv.ParseFloat(valStr, 64) // seconds
+			valRaw := r.Value[1]
+			valStr, ok := valRaw.(string)
+			if !ok {
+				log.Printf("[lead-net][debug] unexpected value type for latency sample node=%s instance=%s: %#v", nodeID, inst, valRaw)
+				continue
+			}
+			v, err := strconv.ParseFloat(valStr, 64) // seconds
+			if err != nil {
+				log.Printf("[lead-net][debug] failed to parse latency value for node=%s instance=%s raw=%q: %v",
+					nodeID, inst, valStr, err)
+				continue
+			}
 			latMs := v * 1000.0
 
 			m := nm.getOrCreate(nodeID)
@@ -112,6 +126,7 @@ func (c *Client) FetchNetworkMatrix(
 	if dropQuery != "" {
 		res, err := c.Query(ctx, dropQuery)
 		if err != nil {
+			log.Printf("[lead-net][debug] drop query %q failed: %v", dropQuery, err)
 			return nil, err
 		}
 		log.Printf("[lead-net][debug] drop query returned %d series", len(res.Data.Result))
@@ -134,8 +149,18 @@ func (c *Client) FetchNetworkMatrix(
 				continue
 			}
 
-			valStr, _ := r.Value[1].(string)
-			v, _ := strconv.ParseFloat(valStr, 64)
+			valRaw := r.Value[1]
+			valStr, ok := valRaw.(string)
+			if !ok {
+				log.Printf("[lead-net][debug] unexpected value type for drop sample node=%s instance=%s: %#v", nodeID, inst, valRaw)
+				continue
+			}
+			v, err := strconv.ParseFloat(valStr, 64)
+			if err != nil {
+				log.Printf("[lead-net][debug] failed to parse drop value for node=%s instance=%s raw=%q: %v",
+					nodeID, inst, valStr, err)
+				continue
+			}
 
 			m := nm.getOrCreate(nodeID)
 			m.DropRate = v
@@ -149,6 +174,7 @@ func (c *Client) FetchNetworkMatrix(
 	if bwQuery != "" {
 		res, err := c.Query(ctx, bwQuery)
 		if err != nil {
+			log.Printf("[lead-net][debug] bandwidth/flow query %q failed: %v", bwQuery, err)
 			return nil, err
 		}
 		log.Printf("[lead-net][debug] bandwidth/flow query returned %d series", len(res.Data.Result))
@@ -171,8 +197,18 @@ func (c *Client) FetchNetworkMatrix(
 				continue
 			}
 
-			valStr, _ := r.Value[1].(string)
-			v, _ := strconv.ParseFloat(valStr, 64)
+			valRaw := r.Value[1]
+			valStr, ok := valRaw.(string)
+			if !ok {
+				log.Printf("[lead-net][debug] unexpected value type for bandwidth sample node=%s instance=%s: %#v", nodeID, inst, valRaw)
+				continue
+			}
+			v, err := strconv.ParseFloat(valStr, 64)
+			if err != nil {
+				log.Printf("[lead-net][debug] failed to parse bandwidth value for node=%s instance=%s raw=%q: %v",
+					nodeID, inst, valStr, err)
+				continue
+			}
 
 			m := nm.getOrCreate(nodeID)
 			m.BandwidthRate = v

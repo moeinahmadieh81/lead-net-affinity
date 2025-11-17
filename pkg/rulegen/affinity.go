@@ -1,6 +1,8 @@
 package rulegen
 
 import (
+	"log"
+
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -22,8 +24,12 @@ func GenerateAffinityForPath(
 	cfg AffinityConfig,
 ) {
 	if len(path.Nodes) < 2 {
+		log.Printf("[lead-net][affinity] path too short for affinity: %v", path.Nodes)
 		return
 	}
+
+	log.Printf("[lead-net][affinity] generating affinity for path=%v score=%.2f cfg=%+v",
+		path.Nodes, pathScore, cfg)
 
 	// Scale normalized [0,100] to [MinAffinityWeight, MaxAffinityWeight]
 	if cfg.MaxAffinityWeight <= 0 {
@@ -35,8 +41,11 @@ func GenerateAffinityForPath(
 	w := cfg.MinAffinityWeight +
 		int(pathScore/100.0*float64(cfg.MaxAffinityWeight-cfg.MinAffinityWeight))
 	if w <= 0 {
+		log.Printf("[lead-net][affinity] computed weight<=0 (%d) for path=%v; skipping", w, path.Nodes)
 		return
 	}
+
+	log.Printf("[lead-net][affinity] computed affinity weight=%d for path=%v", w, path.Nodes)
 
 	for i := 0; i < len(path.Nodes)-1; i++ {
 		a := path.Nodes[i]
@@ -45,9 +54,13 @@ func GenerateAffinityForPath(
 		dA, okA := deploys[a]
 		dB, okB := deploys[b]
 		if !okA || !okB {
+			log.Printf("[lead-net][affinity] missing deployments for edge %s -> %s (okA=%v okB=%v); skipping",
+				a, b, okA, okB)
 			continue
 		}
 		if dA.Spec.Template.Labels == nil || len(dA.Spec.Template.Labels) == 0 {
+			log.Printf("[lead-net][affinity] deployment %s/%s has no template labels; cannot create selector for path edge %s -> %s",
+				dA.Namespace, dA.Name, a, b)
 			continue
 		}
 
@@ -78,6 +91,9 @@ func GenerateAffinityForPath(
 					PreferredDuringSchedulingIgnoredDuringExecution,
 				term,
 			)
+
+		log.Printf("[lead-net][affinity] added podAffinity: from service=%s (deployment=%s/%s) to service=%s (deployment=%s/%s) weight=%d",
+			a, dA.Namespace, dA.Name, b, dB.Namespace, dB.Name, w)
 	}
 }
 
@@ -89,6 +105,7 @@ func AddAntiAffinityForBadLink(
 	weight int32,
 ) {
 	if len(badSelector) == 0 || weight <= 0 {
+		log.Printf("[lead-net][affinity] AddAntiAffinityForBadLink: no badSelector or non-positive weight (weight=%d); skipping", weight)
 		return
 	}
 
@@ -116,4 +133,7 @@ func AddAntiAffinityForBadLink(
 				PreferredDuringSchedulingIgnoredDuringExecution,
 			term,
 		)
+
+	log.Printf("[lead-net][affinity] added anti-affinity to deployment %s/%s weight=%d selector=%v",
+		d.Namespace, d.Name, weight, badSelector)
 }

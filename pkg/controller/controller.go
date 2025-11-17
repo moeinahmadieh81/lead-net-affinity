@@ -45,6 +45,57 @@ type Controller struct {
 	dryRun   bool
 }
 
+// nodeIPResolver implements scoring.NodeIPResolver by using the KubeClient to
+// look up a node's InternalIP/ExternalIP and caching the result.
+type nodeIPResolver struct {
+	k8s   KubeClient
+	cache map[string]string
+}
+
+// IPForNode returns the IP address for a given Kubernetes node name.
+// It prefers InternalIP, then ExternalIP. If no address can be found, it
+// returns the empty string and logs at info level.
+func (r *nodeIPResolver) IPForNode(nodeName string) string {
+	if nodeName == "" {
+		return ""
+	}
+	if ip, ok := r.cache[nodeName]; ok {
+		return ip
+	}
+
+	node, err := r.k8s.GetNode(context.Background(), nodeName)
+	if err != nil {
+		log.Printf("[lead-net][ip-resolver] GetNode(%q) failed: %v", nodeName, err)
+		r.cache[nodeName] = ""
+		return ""
+	}
+
+	var internalIP, externalIP string
+	for _, addr := range node.Status.Addresses {
+		if addr.Type == corev1.NodeInternalIP && internalIP == "" {
+			internalIP = addr.Address
+		}
+		if addr.Type == corev1.NodeExternalIP && externalIP == "" {
+			externalIP = addr.Address
+		}
+	}
+
+	ip := internalIP
+	if ip == "" {
+		ip = externalIP
+	}
+
+	if ip == "" {
+		log.Printf("[lead-net][ip-resolver] node %q has no InternalIP/ExternalIP addresses", nodeName)
+		r.cache[nodeName] = ""
+		return ""
+	}
+
+	r.cache[nodeName] = ip
+	log.Printf("[lead-net][ip-resolver] mapped node %q -> ip %q", nodeName, ip)
+	return ip
+}
+
 func New(cfg *config.Config, k8s KubeClient, prom PromClient) *Controller {
 	level := LogLevelInfo
 	if v := strings.ToLower(os.Getenv("LEAD_NET_LOG")); v == "debug" {
@@ -120,6 +171,7 @@ func (c *Controller) reconcileOnce(ctx context.Context) error {
 	paths := g.FindAllPaths()
 	if len(paths) == 0 {
 		c.infof("no paths found from entry %q; nothing to do", c.cfg.Graph.Entry)
+		c.debugf("==== reconcile end (no paths) ====")
 		return nil
 	}
 	c.debugf("found %d paths from entry %q", len(paths), c.cfg.Graph.Entry)
@@ -127,16 +179,23 @@ func (c *Controller) reconcileOnce(ctx context.Context) error {
 	// 2) Deployments
 	deploysSlice, err := c.k8s.ListDeployments(ctx, c.cfg.NamespaceSelector)
 	if err != nil {
+		c.infof("ListDeployments failed: %v", err)
 		return err
 	}
 	deploysBySvc := kube.MapDeploymentsByService(deploysSlice)
 	c.debugf("found %d deployments across namespaces, mapped %d services",
 		len(deploysSlice), len(deploysBySvc))
 
-	// 3) Placement info (used for per-node network penalty)
+	// 3) Placement resolver (nodeName lookup per service)
 	placements := kube.NewPlacementResolver(c.k8s, c.cfg.NamespaceSelector)
 
-	// 4) Network metrics (per-node)
+	// ⭐ NEW: Node IP resolver (nodeName -> IP matching Prometheus instance)
+	ipResolver := &nodeIPResolver{
+		k8s:   c.k8s,
+		cache: map[string]string{},
+	}
+
+	// 4) Fetch per-node network metrics
 	nm, err := c.prom.FetchNetworkMatrix(
 		ctx,
 		c.cfg.Prometheus.NodeRTTQuery,
@@ -144,48 +203,61 @@ func (c *Controller) reconcileOnce(ctx context.Context) error {
 		c.cfg.Prometheus.NodeBandwidthQuery,
 	)
 	if err != nil {
-		c.infof("warning: failed to fetch network metrics; using base LEAD scores only: %v", err)
+		c.infof("warning: failed to fetch network metrics; using base-only: %v", err)
+	} else if nm == nil {
+		c.infof("warning: network matrix is nil; fallback to base-only")
 	} else {
 		c.debugf("fetched network matrix with %d nodes", len(nm.Nodes))
 	}
 
-	// 5) Base LEAD scores
+	// 5) Compute base scores for each path
+	baseWeights := scoring.Weights{
+		PathLengthWeight:   c.cfg.Scoring.PathLengthWeight,
+		PodCountWeight:     c.cfg.Scoring.PodCountWeight,
+		ServiceEdgesWeight: c.cfg.Scoring.ServiceEdgesWeight,
+		RPSWeight:          c.cfg.Scoring.RPSWeight,
+	}
 	baseScores := make([]float64, len(paths))
 	for i, p := range paths {
 		in := scoring.BaseInput{
 			PathLength:       len(p.Nodes),
 			PodCount:         scoring.EstimatePodCount(p),
 			ServiceEdgeCount: scoring.EstimateServiceEdges(p),
-			RPS:              0, // hook RPS here if you want
+			RPS:              0,
 		}
-		baseScores[i] = scoring.BaseScore(in, scoring.Weights{
-			PathLengthWeight:   c.cfg.Scoring.PathLengthWeight,
-			PodCountWeight:     c.cfg.Scoring.PodCountWeight,
-			ServiceEdgesWeight: c.cfg.Scoring.ServiceEdgesWeight,
-			RPSWeight:          c.cfg.Scoring.RPSWeight,
-		})
+		baseScores[i] = scoring.BaseScore(in, baseWeights)
 	}
 	normBase := scoring.Normalize(baseScores)
 	for i := range paths {
 		paths[i].BaseScore = normBase[i]
 	}
 
-	// 6) Network penalty + final scores (per-path, based on per-node severity)
-	finals := make([]float64, len(paths))
+	// 6) Compute network penalties per path
+	finalScores := make([]float64, len(paths))
+	netWeights := scoring.NetWeights{
+		NetLatencyWeight:   c.cfg.Scoring.NetLatencyWeight,
+		NetDropWeight:      c.cfg.Scoring.NetDropWeight,
+		NetBandwidthWeight: c.cfg.Scoring.NetBandwidthWeight,
+		BadLatencyMs:       c.cfg.Affinity.BadLatencyMs,
+		BadDropRate:        c.cfg.Affinity.BadDropRate,
+	}
 	for i := range paths {
 		p := &paths[i]
-		pen := scoring.ComputeNetworkPenalty(*p, placements, nm, scoring.NetWeights{
-			NetLatencyWeight:   c.cfg.Scoring.NetLatencyWeight,
-			NetDropWeight:      c.cfg.Scoring.NetDropWeight,
-			NetBandwidthWeight: c.cfg.Scoring.NetBandwidthWeight,
-			BadLatencyMs:       c.cfg.Affinity.BadLatencyMs,
-			BadDropRate:        c.cfg.Affinity.BadDropRate,
-		})
+		var pen float64
+		if nm != nil {
+			pen = scoring.ComputeNetworkPenalty(
+				*p,
+				placements,
+				nm,
+				ipResolver, // ⭐ FIXED: this was missing!
+				netWeights,
+			)
+		}
 		p.NetworkPenalty = pen
 		p.FinalScore = scoring.CombineScores(p.BaseScore, pen)
-		finals[i] = p.FinalScore
+		finalScores[i] = p.FinalScore
 	}
-	normFinal := scoring.Normalize(finals)
+	normFinal := scoring.Normalize(finalScores)
 	for i := range paths {
 		paths[i].FinalScore = normFinal[i]
 	}
@@ -195,12 +267,11 @@ func (c *Controller) reconcileOnce(ctx context.Context) error {
 		return paths[i].FinalScore > paths[j].FinalScore
 	})
 
-	// 8) Top-K
+	// 8) Top-K affinity generation
 	top := c.cfg.Affinity.TopPaths
 	if top <= 0 || top > len(paths) {
 		top = len(paths)
 	}
-
 	c.infof("evaluated %d paths; top %d:", len(paths), top)
 	for i := 0; i < top; i++ {
 		p := paths[i]
@@ -213,15 +284,12 @@ func (c *Controller) reconcileOnce(ctx context.Context) error {
 		MaxAffinityWeight: c.cfg.Affinity.MaxAffinityWeight,
 	}
 
-	// 9) Generate affinities (in-memory)
 	for i := 0; i < top; i++ {
 		p := paths[i]
-		c.debugf("generating affinity for path[%d]: %s (score=%.1f)",
-			i, formatPath(p), p.FinalScore)
 		rulegen.GenerateAffinityForPath(deploysBySvc, p, p.FinalScore, affCfg)
 	}
 
-	// 10) Apply or dry-run
+	// 9) Apply or dry-run
 	updated := 0
 	for _, d := range deploysBySvc {
 		if c.dryRun {
@@ -229,21 +297,15 @@ func (c *Controller) reconcileOnce(ctx context.Context) error {
 			continue
 		}
 		if err := c.k8s.UpdateDeployment(ctx, d); err != nil {
-			c.infof("update deployment %s/%s failed: %v", d.Namespace, d.Name, err)
+			c.infof("update failed: %s/%s: %v", d.Namespace, d.Name, err)
 		} else {
 			updated++
 		}
 	}
 
-	if c.dryRun {
-		c.infof("reconcile (dry-run) completed in %s; no deployments updated",
-			time.Since(start).Round(time.Millisecond))
-	} else {
-		c.infof("reconcile completed in %s; deployments updated: %d",
-			time.Since(start).Round(time.Millisecond), updated)
-	}
-
-	c.debugf("==== reconcile end ====")
+	c.infof("reconcile completed in %s; deployments updated: %d",
+		time.Since(start).Round(time.Millisecond), updated)
+	c.debugf("=`=== reconcile end ====")
 	return nil
 }
 
