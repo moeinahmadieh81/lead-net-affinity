@@ -30,6 +30,7 @@ type KubeClient interface {
 	ListDeployments(ctx context.Context, namespaces []string) ([]appsv1.Deployment, error)
 	UpdateDeployment(ctx context.Context, d *appsv1.Deployment) error
 	ListPods(ctx context.Context, namespace, selector string) ([]corev1.Pod, error)
+	GetNode(ctx context.Context, name string) (*corev1.Node, error)
 }
 
 type PromClient interface {

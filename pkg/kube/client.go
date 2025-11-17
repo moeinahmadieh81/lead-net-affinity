@@ -52,3 +52,7 @@ func (c *Client) ListPods(ctx context.Context, namespace, selector string) ([]co
 	}
 	return pods.Items, nil
 }
+
+func (c *Client) GetNode(ctx context.Context, name string) (*corev1.Node, error) {
+	return c.cs.CoreV1().Nodes().Get(ctx, name, metav1.GetOptions{})
+}

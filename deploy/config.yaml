@@ -78,20 +78,37 @@ prometheus:
   sampleWindow: "10m"
 
 scoring:
+  #
+  # Base LEAD scoring (unchanged)
+  #
   pathLengthWeight:     1.0
   podCountWeight:       1.0
   serviceEdgesWeight:   1.0
   rpsWeight:            0.0
 
-  netLatencyWeight:     2.0   # make latency matter more
-  netDropWeight:        3.0
-  netBandwidthWeight:   1.0   # turn on bandwidth influence
+  #
+  # Per-node severity weights:
+  # How much each dimension should influence placement.
+  #
+  netLatencyWeight:     2.0      # high latency should strongly penalize
+  netDropWeight:        3.0      # drops are severe
+  netBandwidthWeight:   1.0      # higher flow rate = busier node
+
+  #
+  # Interpretation thresholds for severity normalization:
+  #
+  badLatencyMs:   100.0   # ~100ms considered "bad" for nano-services
+  badDropRate:    10000   # depends on real traffic
+  badBandwidthRate: 20.0  # nodes above ~20 flows/sec are "busy"
 
 affinity:
+  #
+  # How many top paths affect pod affinity
+  #
   topPaths:           5
+
+  #
+  # Kubernetes affinity weights turned into 1–100 range
+  #
   minAffinityWeight:  50
   maxAffinityWeight:  100
-
-  # much tighter thresholds now:
-  badLatencyMs: 0.01    # 0.01 ms = 10 microseconds
-  badDropRate:  1000    # tune based on what you see in Prom
