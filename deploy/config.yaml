@@ -72,21 +72,27 @@ prometheus:
 
   NodeBandwidthQuery: |
     sum(
-      rate(hubble_flows_processed_total[10m])
+      rate(cilium_forward_bytes_total[10m])
     ) by (instance)
 
   sampleWindow: "10m"
 
 scoring:
+  # Base weights
+  pathLengthWeight: 1.0
+  podCountWeight: 0.5
+  serviceEdgesWeight: 1.0
+  rpsWeight: 2.0
+
   # Normalize severity: define what "bad" means ❗
-  badLatencyMs:   80
-  badDropRate:    5
-  badBandwidthRate: 12
+  BadLatencyMs:   80
+  BadDropRate:    5
+  BadBandwidthRate: 20
 
   # Increase importance of these dimensions
-  netLatencyWeight:     3
-  netDropWeight:        5
-  netBandwidthWeight:   2
+  NetLatencyWeight:     4
+  NetDropWeight:        6
+  NetBandwidthWeight:   1
 
 affinity:
   topPaths:           5
