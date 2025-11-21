@@ -90,9 +90,9 @@ scoring:
   BadBandwidthRate: 20
 
   # Increase importance of these dimensions
-  NetLatencyWeight:     4
-  NetDropWeight:        6
-  NetBandwidthWeight:   1
+  netLatencyWeight:     4
+  netDropWeight:        6
+  netBandwidthWeight:   1
 
 affinity:
   topPaths:           5
