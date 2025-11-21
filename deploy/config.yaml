@@ -85,9 +85,9 @@ scoring:
   rpsWeight: 2.0
 
   # Normalize severity: define what "bad" means ❗
-  BadLatencyMs:   80
-  BadDropRate:    5
-  BadBandwidthRate: 20
+  badLatencyMs:   80
+  badDropRate:    5
+  badBandwidthRate: 20
 
   # Increase importance of these dimensions
   netLatencyWeight:     4
