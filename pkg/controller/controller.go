@@ -238,8 +238,9 @@ func (c *Controller) reconcileOnce(ctx context.Context) error {
 		NetLatencyWeight:   c.cfg.Scoring.NetLatencyWeight,
 		NetDropWeight:      c.cfg.Scoring.NetDropWeight,
 		NetBandwidthWeight: c.cfg.Scoring.NetBandwidthWeight,
-		BadLatencyMs:       c.cfg.Affinity.BadLatencyMs,
-		BadDropRate:        c.cfg.Affinity.BadDropRate,
+		BadLatencyMs:       c.cfg.Scoring.BadLatencyMs,
+		BadDropRate:        c.cfg.Scoring.BadDropRate,
+		BadBandwidthRate:   c.cfg.Scoring.BadBandwidthRate,
 	}
 	for i := range paths {
 		p := &paths[i]

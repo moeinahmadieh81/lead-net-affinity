@@ -79,15 +79,15 @@ prometheus:
 
 scoring:
   # Base weights
-  pathLengthWeight: 1.0
+  pathLengthWeight: 1
   podCountWeight: 0.5
-  serviceEdgesWeight: 1.0
-  rpsWeight: 2.0
+  serviceEdgesWeight: 1
+  rpsWeight: 2
 
   # Normalize severity: define what "bad" means ❗
-  badLatencyMs:   80
-  badDropRate:    5
-  badBandwidthRate: 20
+  badLatencyMs: 100
+  badDropRate:    50
+  badBandwidthRate: 200000
 
   # Increase importance of these dimensions
   netLatencyWeight:     4

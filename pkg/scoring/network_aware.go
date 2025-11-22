@@ -12,9 +12,9 @@ type NetWeights struct {
 	NetDropWeight      float64
 	NetBandwidthWeight float64
 
-	// Thresholds beyond which we start treating the metric as "bad".
-	BadLatencyMs float64
-	BadDropRate  float64
+	BadLatencyMs     float64
+	BadDropRate      float64
+	BadBandwidthRate float64
 }
 
 // PodPlacement is implemented by kube.PlacementResolver.
@@ -69,10 +69,15 @@ func NodeSeverityFromMetrics(m *promnet.NodeMetrics, w NetWeights) float64 {
 	}
 
 	// Bandwidth
-	if w.NetBandwidthWeight > 0 && m.BandwidthRate > 0 {
-		penalty += w.NetBandwidthWeight * m.BandwidthRate
-		log.Printf("[lead-net][net-score] node=%s bandwidth contribution: bw=%f partialPenalty=%f",
-			m.NodeID, m.BandwidthRate, penalty)
+	// Bandwidth: only penalize when we're above the "bad" threshold.
+	if w.NetBandwidthWeight > 0 && w.BadBandwidthRate > 0 && m.BandwidthRate > w.BadBandwidthRate {
+		factor := (m.BandwidthRate / w.BadBandwidthRate) - 1.0
+		if factor < 0 {
+			factor = 0
+		}
+		penalty += w.NetBandwidthWeight * factor
+		log.Printf("[lead-net][net-score] node=%s bandwidth contribution: factor=%f partialPenalty=%f",
+			m.NodeID, factor, penalty)
 	}
 
 	log.Printf("[lead-net][net-score] NodeSeverityFromMetrics: node=%s finalPenalty=%f", m.NodeID, penalty)

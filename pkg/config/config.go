@@ -30,7 +30,9 @@ type ScoringWeights struct {
 	PodCountWeight     float64 `yaml:"podCountWeight"`
 	ServiceEdgesWeight float64 `yaml:"serviceEdgesWeight"`
 	RPSWeight          float64 `yaml:"rpsWeight"`
-
+	BadLatencyMs       float64 `yaml:"badLatencyMs"`
+	BadDropRate        float64 `yaml:"badDropRate"`
+	BadBandwidthRate   float64 `yaml:"badBandwidthRate"`
 	NetLatencyWeight   float64 `yaml:"netLatencyWeight"`
 	NetDropWeight      float64 `yaml:"netDropWeight"`
 	NetBandwidthWeight float64 `yaml:"netBandwidthWeight"`
