@@ -1,13 +1,9 @@
-apiVersion: apps/v1
-kind: Deployment
+apiVersion: batch/v1
+kind: Job
 metadata:
-  name: lead-net-affinity
+  name: lead-net-affinity-job
   namespace: default
 spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: lead-net-affinity
   template:
     metadata:
       labels:
@@ -34,3 +30,5 @@ spec:
         - name: cfg
           configMap:
             name: lead-net-affinity-config
+      restartPolicy: Never
+  backoffLimit: 0
