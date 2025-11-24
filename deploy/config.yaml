@@ -84,15 +84,15 @@ scoring:
   serviceEdgesWeight: 1
   rpsWeight: 2
 
-  # Normalize severity: define what "bad" means ❗
-  badLatencyMs: 60
-  badDropRate:    20
-  badBandwidthRate: 50000
+  # ⚖️ BALANCED: Less strict thresholds
+  badLatencyMs: 70        # ⬆️ Was 60 - more lenient
+  badDropRate: 30         # ⬆️ Was 20 - more lenient
+  badBandwidthRate: 75000 # ⬆️ Was 50000 - more lenient
 
-  # Increase importance of these dimensions
-  netLatencyWeight:     8
-  netDropWeight:        20
-  netBandwidthWeight:   3
+  # ⚖️ BALANCED: Moderate network penalties
+  netLatencyWeight: 6     # ⬇️ Was 8 - less aggressive
+  netDropWeight: 12       # ⬇️ Was 20 - much less aggressive
+  netBandwidthWeight: 2   # ⬇️ Was 3 - less aggressive
 
 affinity:
   topPaths:           5
