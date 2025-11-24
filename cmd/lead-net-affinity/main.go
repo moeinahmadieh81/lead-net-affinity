@@ -39,6 +39,18 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
+	// ⭐ NEW: Check if we should run once or continuously
+	if os.Getenv("LEAD_NET_ONCE") == "true" {
+		log.Printf("LEAD_NET_ONCE=true - running one-time reconciliation")
+		if err := ctrl.RunOnce(ctx); err != nil {
+			log.Fatalf("one-time reconciliation failed: %v", err)
+		}
+		log.Printf("one-time reconciliation completed successfully")
+		return
+	}
+
+	// Original continuous execution
+	log.Printf("LEAD_NET_ONCE not set - running continuous reconciliation")
 	if err := ctrl.Run(ctx); err != nil {
 		log.Fatalf("controller error: %v", err)
 	}

@@ -20,6 +20,10 @@ spec:
               value: debug
             - name: LEAD_NET_DRYRUN
               value: "false"
+            - name: LEAD_NET_DRY_DELETE
+              value: "false"  # NEW: Enable actual pod deletion for rebalancing
+            - name: LEAD_NET_ONCE
+              value: "true"   # NEW: Run once and exit (recommended for Job)
           volumeMounts:
             - name: cfg
               mountPath: /etc/lead-net-affinity

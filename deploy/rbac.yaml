@@ -11,15 +11,19 @@ metadata:
 rules:
   - apiGroups: [""]
     resources: ["pods"]
-    verbs: ["get", "list", "watch"]
+    verbs: ["get", "list", "watch", "delete"]  # ⭐ ADDED "delete"
 
   - apiGroups: [""]
     resources: ["nodes"]
-    verbs: ["get", "list", "watch"]   # <-- NEW FIX
+    verbs: ["get", "list", "watch"]
 
   - apiGroups: ["apps"]
     resources: ["deployments"]
     verbs: ["get", "list", "watch", "update", "patch"]
+
+  - apiGroups: [""]
+    resources: ["configmaps"]  # ⭐ ADDED for config access
+    verbs: ["get", "list"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

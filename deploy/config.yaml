@@ -85,16 +85,21 @@ scoring:
   rpsWeight: 2
 
   # Normalize severity: define what "bad" means ❗
-  badLatencyMs: 100
-  badDropRate:    50
-  badBandwidthRate: 200000
+  badLatencyMs: 60
+  badDropRate:    20
+  badBandwidthRate: 50000
 
   # Increase importance of these dimensions
-  netLatencyWeight:     4
-  netDropWeight:        6
-  netBandwidthWeight:   1
+  netLatencyWeight:     8
+  netDropWeight:        20
+  netBandwidthWeight:   3
 
 affinity:
   topPaths:           5
   minAffinityWeight:  50
   maxAffinityWeight:  100
+
+rebalancing:
+  enabled: true
+  minPodAgeSeconds: 30    # Don't delete pods younger than 30 seconds
+  maxConcurrentDeletions: 3

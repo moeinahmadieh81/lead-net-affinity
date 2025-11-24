@@ -82,3 +82,21 @@ func (c *Client) GetNode(ctx context.Context, name string) (*corev1.Node, error)
 	log.Printf("[lead-net][kube] GetNode %q succeeded", name)
 	return node, nil
 }
+
+func (c *Client) DeletePod(ctx context.Context, namespace, name string) error {
+	log.Printf("[lead-net][kube] deleting pod %s/%s", namespace, name)
+
+	deletePolicy := metav1.DeletePropagationForeground
+	deleteOptions := metav1.DeleteOptions{
+		PropagationPolicy: &deletePolicy,
+	}
+
+	err := c.cs.CoreV1().Pods(namespace).Delete(ctx, name, deleteOptions)
+	if err != nil {
+		log.Printf("[lead-net][kube] failed to delete pod %s/%s: %v", namespace, name, err)
+		return err
+	}
+
+	log.Printf("[lead-net][kube] successfully deleted pod %s/%s", namespace, name)
+	return nil
+}
