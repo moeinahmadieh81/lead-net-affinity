@@ -23,7 +23,7 @@ spec:
             - name: LEAD_NET_LOG
               value: debug
             - name: LEAD_NET_DRYRUN
-              value: "true"
+              value: "false"
           volumeMounts:
             - name: cfg
               mountPath: /etc/lead-net-affinity
